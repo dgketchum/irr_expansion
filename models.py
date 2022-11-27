@@ -80,63 +80,30 @@ def random_forest(csv, n_estimators=50, out_shape=None):
     return
 
 
-def random_forest_feature_select(csv, n_estimators=150, features=None):
-    df = read_csv(csv, engine='python')
-    labels = df['POINT_TYPE'].values
-    df.drop(columns=['YEAR', 'POINT_TYPE'], inplace=True)
-    df.dropna(axis=1, inplace=True)
-    labels = labels.reshape((labels.shape[0],))
-    precision = []
-    for i, c in enumerate(features, start=1):
-        cols = [f for f in features[:i]]
-        sub_df = df[cols]
-        data = sub_df.values
-        x, x_test, y, y_test = train_test_split(data, labels, test_size=0.33,
-                                                random_state=None)
-
-        rf = RandomForestClassifier(n_estimators=n_estimators,
-                                    n_jobs=-1,
-                                    bootstrap=False)
-
-        rf.fit(x, y)
-        y_pred = rf.predict(x_test)
-        cf = confusion_matrix(y_test, y_pred)
-        prec = consumer(cf)
-        print(i, cols[-1:], prec[0])
-        precision.append(prec[0])
-    print(precision)
-
-
-def export_tree(rf, tree_idx, out_file=None):
-    tree = rf.estimators_[tree_idx]
-    export_graphviz(tree, out_file=out_file,
-                    feature_names=FEATURE_NAMES,
-                    class_names=CLASS_NAMES,
-                    rounded=True, proportion=False,
-                    precision=2, filled=True)
-    png = out_file.replace('.dot', '.png')
-    call(['dot', '-Tpng', out_file, '-o', png, '-Gdpi=600'])
-    return None
-
-
-def find_rf_variable_importance(csv):
+def find_rf_variable_importance(csv, target, out_csv=None, drop=None, n_features=25):
     first = True
     master = {}
     df = read_csv(csv, engine='python')
-    # df = df[(df['POINT_TYPE'] == 0) | (df['POINT_TYPE'] == 1)]
-    original = deepcopy(df)
-    labels = list(df['POINT_TYPE'].values)
-    df.drop(columns=['YEAR', 'POINT_TYPE'], inplace=True)
+    try:
+        df = df[df['irr_2020'] == 2]
+    except KeyError:
+        pass
+    df_copy = deepcopy(df)
+    labels = list(df[target].values)
+    try:
+        df.drop(columns=drop + [target], inplace=True)
+    except KeyError:
+        df.drop(columns=[target], inplace=True)
     df.dropna(axis=1, inplace=True)
     data = df.values
     names = df.columns
 
     for x in range(10):
         d, _, l, _ = train_test_split(data, labels, train_size=0.67)
-        print('model iteration {}'.format(x))
-        rf = RandomForestClassifier(n_estimators=150,
-                                    n_jobs=-1,
-                                    bootstrap=True)
+        print('model iteration {}'.format(x + 1))
+        rf = RandomForestRegressor(n_estimators=150,
+                                   n_jobs=-1,
+                                   bootstrap=True)
 
         rf.fit(d, l)
         _list = [(f, v) for f, v in zip(names, rf.feature_importances_)]
@@ -153,143 +120,17 @@ def find_rf_variable_importance(csv):
 
     master = list(master.items())
     master = sorted(master, key=lambda x: x[1], reverse=True)
-    print('\nall features')
-    random_forest(original)
-    print('\ntop 50 features')
-    carry_features = [x[0] for x in master[:50]] + ['POINT_TYPE', 'YEAR']
-    original = original[carry_features]
+    print('\ntop {} features:'.format(n_features))
+    carry_features = [x[0] for x in master[:n_features]]
+    print(carry_features)
+    df[target] = df_copy.loc[df.index, target]
     try:
-        random_forest(original)
+        df.index = df['id']
     except KeyError:
         pass
-    return master
-
-
-def random_forest_k_fold(csv):
-    df = read_csv(csv, engine='python')
-    labels = df['POINT_TYPE'].values
-    df.drop(columns=['YEAR', 'POINT_TYPE'], inplace=True)
-    df.dropna(axis=1, inplace=True)
-    data = df.values
-    names = df.columns
-    labels = labels.reshape((labels.shape[0],))
-    kf = KFold(n_splits=2, shuffle=True)
-
-    for train_idx, test_idx in kf.split(data[:-1, :], y=labels[:-1]):
-        x, x_test = data[train_idx], data[test_idx]
-        y, y_test = labels[train_idx], labels[test_idx]
-
-        rf = RandomForestClassifier(n_estimators=100,
-                                    n_jobs=-1,
-                                    bootstrap=False)
-
-        rf.fit(x, y)
-        _list = [(f, v) for f, v in zip(names, rf.feature_importances_)]
-        important = sorted(_list, key=lambda x: x[1], reverse=True)
-        pprint(important)
-        pprint(rf.score(x_test, y_test))
-        y_pred = rf.predict(x_test)
-        cf = confusion_matrix(y_test, y_pred)
-        pprint(cf)
-        producer(cf)
-        consumer(cf)
-
-    return important
-
-
-def random_hyperparameter_search(csv):
-    df = read_csv(csv, engine='python')
-    labels = df['POINT_TYPE'].values
-    df.drop(columns=['YEAR', 'POINT_TYPE'], inplace=True)
-    df.dropna(axis=1, inplace=True)
-    x = df.values
-    y = labels.reshape((labels.shape[0],))
-    # x, x_test, y, y_test = train_test_split(x, y, test_size=0.33,
-    #                                         random_state=None)
-    clf = RandomForestClassifier(n_estimators=100)
-
-    def report(results, n_top=3):
-        for i in range(1, n_top + 1):
-            candidates = flatnonzero(results['rank_test_score'] == i)
-            for candidate in candidates:
-                print("Model with rank: {0}".format(i))
-                print("Mean validation score: {0:.3f} (std: {1:.3f})".format(
-                    results['mean_test_score'][candidate],
-                    results['std_test_score'][candidate]))
-                print("Parameters: {0}".format(results['params'][candidate]))
-                print("")
-
-    # specify parameters and distributions to sample from
-    param_dist = {"max_depth": [3, None],
-                  "max_features": sp_randint(1, 11),
-                  "min_samples_split": sp_randint(2, 11),
-                  "bootstrap": [True, False],
-                  "criterion": ["gini", "entropy"]}
-
-    # run randomized search
-    n_iter_search = 20
-    random_search = RandomizedSearchCV(clf, param_distributions=param_dist,
-                                       n_iter=n_iter_search, cv=5)
-
-    start = time()
-    random_search.fit(x, y)
-    print("RandomizedSearchCV took %.2f seconds for %d candidates"
-          " parameter settings." % ((time() - start), n_iter_search))
-    report(random_search.cv_results_)
-
-    # use a full grid over all parameters
-    param_grid = {"max_depth": [3, None],
-                  "max_features": [1, 3, 10],
-                  "min_samples_split": [2, 3, 10],
-                  "bootstrap": [True, False],
-                  "criterion": ["gini", "entropy"]}
-
-    # run grid search
-    grid_search = GridSearchCV(clf, param_grid=param_grid, cv=5)
-    start = time()
-    grid_search.fit(x, y)
-
-    print("GridSearchCV took %.2f seconds for %d candidate parameter settings."
-          % (time() - start, len(grid_search.cv_results_['params'])))
-    report(grid_search.cv_results_)
-
-
-def get_confusion_matrix(csv, spec=None):
-    df = read_csv(csv, engine='python')
-
-    if spec:
-        for c in df.columns:
-            if c in INT_COLS:
-                df[c] = df[c].astype(int, copy=True)
-            else:
-                df[c] = df[c].astype(float, copy=True)
-
-        counts = df['POINT_TYPE'].value_counts()
-        _min = min(counts.values)
-        for i, j in spec:
-            if i == 0:
-                ndf = df[df['POINT_TYPE'] == i].sample(n=j)
-            else:
-                ndf = concat([ndf, df[df['POINT_TYPE'] == i].sample(n=j)], sort=False)
-        sample_counts = ndf['POINT_TYPE'].value_counts()
-        print('original set: {}\n sampled set: {}'.format(counts, sample_counts))
-        df = ndf
-
-    y_true, y_pred = df['POINT_TYPE'].values, df['classification'].values
-
-    print('\nclassifcation...')
-    cf = confusion_matrix(y_true, y_pred)
-    pprint(cf)
-    producer(cf)
-    consumer(cf)
-
-    print('\nbinary classification ...')
-    pt = [1 if x in [1, 2, 3] else 0 for x in df['POINT_TYPE'].values]
-    cls = [1 if x in [1, 2, 3] else 0 for x in df['classification'].values]
-    cf = confusion_matrix(pt, cls)
-    pprint(cf)
-    producer(cf)
-    consumer(cf)
+    if out_csv:
+        df.to_csv(out_csv, index=False)
+    return df
 
 
 if __name__ == '__main__':
@@ -299,6 +140,9 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS/expansion/tables/points_extracts'
 
     c = os.path.join(root, 'uinta_2020.csv')
-    s= os.path.join(root, 'uinta_2020.shp')
-    random_forest(c, out_shape=s)
+    out = os.path.join(root, 'uinta_2020_select.csv')
+    s = os.path.join(root, 'uinta_2020.shp')
+    find_rf_variable_importance(out, target='et_2020_9', out_csv=None,
+                                drop=['.geo', 'system:index', 'et_2020_10', 'et_2020_4',
+                                      'et_2020_5', 'et_2020_6', 'et_2020_7', 'et_2020_8'])
 # ========================= EOF ====================================================================

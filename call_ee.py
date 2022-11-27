@@ -17,10 +17,53 @@ UMRB_CLIP = 'users/dgketchum/boundaries/umrb_ylstn_clip'
 CMBRB_CLIP = 'users/dgketchum/boundaries/CMB_RB_CLIP'
 CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
 BOUNDARIES = 'users/dgketchum/boundaries'
+WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
 
-def export_classification(out_name, table, asset_root, region, years,
-                          export='asset', bag_fraction=0.5, target='et_09_2020'):
+def get_uncultivated_points(tables, file_prefix):
+    fc = ee.FeatureCollection(tables)
+    irr_coll = ee.ImageCollection(RF_ASSET)
+    coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
+    remap = coll.map(lambda img: img.eq(2))
+    remap = remap.sum().rename('uncult')
+
+    plot_sample_regions = remap.sampleRegions(
+        collection=fc,
+        scale=30,
+        tileScale=16)
+
+    desc = '{}'.format(file_prefix)
+    task = ee.batch.Export.table.toCloudStorage(
+        plot_sample_regions,
+        description=desc,
+        selectors=['uncult', 'id'],
+        bucket='wudr',
+        fileNamePrefix='{}'.format(file_prefix),
+        fileFormat='CSV')
+
+    print(desc)
+    task.start()
+
+
+def get_geomteries():
+    uinta = ee.Geometry.Polygon([[-109.45865297030385, 40.23092798019809],
+                                 [-109.2142071695226, 40.23092798019809],
+                                 [-109.2142071695226, 40.463280555650584],
+                                 [-109.45865297030385, 40.463280555650584],
+                                 [-109.45865297030385, 40.23092798019809]])
+
+    test_point = ee.Geometry.Point(-111.19417486580859, 45.73357569538925)
+
+    return uinta, test_point
+
+
+def export_classification(out_name, table, asset_root, region, years, bag_fraction=0.5, target='et_2020_9',
+                          input_props=None, min_irr_years=5):
+    irr_coll = ee.ImageCollection(RF_ASSET)
+    coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
+    remap = coll.map(lambda img: img.lt(1))
+    irr_min_yr_mask = remap.sum().gte(min_irr_years)
+
     fc = ee.FeatureCollection(table)
     roi = ee.FeatureCollection(region)
 
@@ -29,11 +72,18 @@ def export_classification(out_name, table, asset_root, region, years,
         minLeafPopulation=1,
         bagFraction=bag_fraction).setOutputMode('REGRESSION')
 
-    input_props = fc.first().propertyNames().remove('system:index')
+    if not input_props:
+        input_props = fc.first().propertyNames().remove('system:index').remove('id')
+    else:
+        input_props = ee.List(input_props)
 
-    trained_model = classifier.train(fc, 'POINT_TYPE', input_props)
+    trained_model = classifier.train(fc, target, input_props)
 
     for yr in years:
+
+        irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
+        irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
+
         input_bands = stack_bands(yr, roi)
 
         b, p = input_bands.bandNames().getInfo(), input_props.getInfo()
@@ -45,7 +95,8 @@ def export_classification(out_name, table, asset_root, region, years,
             trained_model = classifier.train(fc, target, input_props)
 
         annual_stack = input_bands.select(input_props)
-        classified_img = annual_stack.unmask().classify(trained_model).int().set({
+
+        classified_img = annual_stack.unmask().classify(trained_model).float().set({
             'system:index': ee.Date('{}-01-01'.format(yr)).format('YYYYMMdd'),
             'system:time_start': ee.Date('{}-01-01'.format(yr)).millis(),
             'system:time_end': ee.Date('{}-12-31'.format(yr)).millis(),
@@ -53,37 +104,25 @@ def export_classification(out_name, table, asset_root, region, years,
             'image_name': out_name,
             'training_data': table,
             'bag_fraction': bag_fraction,
-            'class_key': '0: irrigated, 1: rainfed, 2: uncultivated, 3: wetland'})
+            'target': target})
 
         classified_img = classified_img.clip(roi.geometry())
-
-        if export == 'asset':
-            task = ee.batch.Export.image.toAsset(
-                image=classified_img,
-                description='{}_{}'.format(out_name, yr),
-                assetId=os.path.join(asset_root, '{}_{}'.format(out_name, yr)),
-                scale=30,
-                pyramidingPolicy={'.default': 'mode'},
-                maxPixels=1e13)
-
-        elif export == 'cloud':
-            task = ee.batch.Export.image.toCloudStorage(
-                image=classified_img,
-                description='{}_{}'.format(out_name, yr),
-                bucket='wudr',
-                fileNamePrefix='{}_{}'.format(yr, out_name),
-                scale=30,
-                pyramidingPolicy={'.default': 'mode'},
-                maxPixels=1e13)
-        else:
-            raise NotImplementedError('choose asset or cloud for export')
+        # classified_img = classified_img.mask(irr_mask)
+        classified_img = classified_img.rename('estimate')
+        desc = '{}_{}_4'.format(out_name, yr)
+        task = ee.batch.Export.image.toAsset(
+            image=classified_img,
+            description=desc,
+            assetId=os.path.join(asset_root, desc),
+            scale=30,
+            pyramidingPolicy={'.default': 'mean'},
+            maxPixels=1e13)
 
         task.start()
-        print(os.path.join(asset_root, '{}_{}'.format(out_name, yr)))
+        print(os.path.join(asset_root, desc))
 
 
-def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None,
-                         diagnose=False, properties=None):
+def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None):
     """
     Extract raster values from a points kml file in Fusion Tables. Send annual extracts .csv to GCS wudr bucket.
     Concatenate them using map.tables.concatenate_band_extract().
@@ -130,66 +169,10 @@ def stack_bands(yr, roi):
     :return:
     """
 
-    water_year_start = '{}-10-01'.format(yr - 1)
-    spring_s, spring_e = '{}-03-01'.format(yr), '{}-05-01'.format(yr),
-    late_spring_s, late_spring_e = '{}-05-01'.format(yr), '{}-07-15'.format(yr)
-    summer_s, summer_e = '{}-07-15'.format(yr), '{}-09-30'.format(yr)
-    fall_s, fall_e = '{}-09-30'.format(yr), '{}-12-31'.format(yr)
+    proj = ee.Projection('EPSG:5071').getInfo()
 
-    periods = [('gs', spring_e, fall_s),
-               ('1', spring_s, spring_e),
-               ('2', late_spring_s, late_spring_e),
-               ('3', summer_s, summer_e),
-               ('4', fall_s, fall_e)]
-
-    first = True
-    for name, start, end in periods:
-        prev = 'm' in name
-        bands = landsat_composites(yr, start, end, roi, name, composites_only=prev)
-        if first:
-            input_bands = bands
-            proj = bands.select('B2_gs').projection().getInfo()
-            first = False
-        else:
-            input_bands = input_bands.addBands(bands)
-
-    integrated_composite_bands = []
-
-    for feat in ['nd']:
-        # modify to run in September
-        periods = range(1, 4)
-        c_bands = ['{}_{}'.format(feat, p) for p in periods]
-        b = input_bands.select(c_bands).reduce(ee.Reducer.sum()).rename('{}_int'.format(feat))
-
-        integrated_composite_bands.append(b)
-
-    input_bands = input_bands.addBands(integrated_composite_bands)
-
-    for s, e, n, m in [(spring_s, late_spring_e, 'spr', (3, 8)),
-                       (water_year_start, spring_e, 'wy_spr', (10, 5)),
-                       (water_year_start, summer_e, 'wy_smr', (10, 9))]:
-        gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
-            roi).filterDate(s, e).select('pr', 'eto', 'tmmn', 'tmmx')
-
-        temp = ee.Image(gridmet.select('tmmn').mean().add(gridmet.select('tmmx').mean()
-                                                          .divide(ee.Number(2))).rename('tmp_{}'.format(n)))
-        temp = temp.resample('bilinear').reproject(crs=proj['crs'], scale=30)
-
-        ai_sum = gridmet.select('pr', 'eto').reduce(ee.Reducer.sum()).rename(
-            'prec_tot_{}'.format(n), 'pet_tot_{}'.format(n)).resample('bilinear').reproject(crs=proj['crs'],
-                                                                                            scale=30)
-        wd_estimate = ai_sum.select('prec_tot_{}'.format(n)).subtract(ai_sum.select(
-            'pet_tot_{}'.format(n))).rename('cwd_{}'.format(n))
-
-        worldclim_prec = get_world_climate(proj=proj, months=m, param='prec')
-        anom_prec = ai_sum.select('prec_tot_{}'.format(n)).subtract(worldclim_prec)
-        worldclim_temp = get_world_climate(proj=proj, months=m, param='tavg')
-        anom_temp = temp.subtract(worldclim_temp).rename('an_temp_{}'.format(n))
-
-        input_bands = input_bands.addBands([temp, ai_sum, wd_estimate, anom_temp, anom_prec])
-
-    coords = ee.Image.pixelLonLat().rename(['LON', 'LAT']).resample('bilinear').reproject(crs=proj['crs'],
-                                                                                          scale=30)
+    input_bands = ee.Image.pixelLonLat().rename(['lon', 'lat']).resample('bilinear').reproject(crs=proj['crs'],
+                                                                                               scale=30)
     ned = ee.Image('USGS/NED')
     terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect').reduceResolution(
         ee.Reducer.mean()).reproject(crs=proj['crs'], scale=30)
@@ -198,7 +181,7 @@ def stack_bands(yr, roi):
     tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250')
     tpi_250 = elev.subtract(elev.focal_mean(250, 'circle', 'meters')).add(0.5).rename('tpi_250')
     tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150')
-    input_bands = input_bands.addBands([coords, terrain, tpi_1250, tpi_250, tpi_150, anom_prec, anom_temp])
+    input_bands = input_bands.addBands([terrain, tpi_1250, tpi_250, tpi_150])
 
     et = irr_et_data(yr)
     input_bands = input_bands.addBands([et])
@@ -230,38 +213,33 @@ def irr_et_data(yr):
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
     bands = None
-    irr_coll = ee.ImageCollection(RF_ASSET)
 
     for month in range(4, 11):
         s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
         end_day = monthrange(yr, month)[1]
         e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
 
-        irr_str = 'irr_{}'.format(yr)
-        irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
-        irr = irr.rename(irr_str)
-
         annual_coll = ee.ImageCollection('users/dgketchum/ssebop/cmbrb').merge(
             ee.ImageCollection('users/hoylmanecohydro2/ssebop/cmbrb'))
         et_coll = annual_coll.filter(ee.Filter.date(s, e))
-        et_cmb = et_coll.sum().multiply(0.00001).clip(cmb_clip.geometry())
+        et_cmb = et_coll.sum().clip(cmb_clip.geometry())
 
         annual_coll = ee.ImageCollection('users/kelseyjencso/ssebop/corb').merge(
             ee.ImageCollection('users/dgketchum/ssebop/corb')).merge(
             ee.ImageCollection('users/dpendergraph/ssebop/corb'))
         et_coll = annual_coll.filter(ee.Filter.date(s, e))
-        et_corb = et_coll.sum().multiply(0.00001).clip(corb_clip.geometry())
+        et_corb = et_coll.sum().clip(corb_clip.geometry())
 
         annual_coll_ = ee.ImageCollection('projects/usgs-ssebop/et/umrb')
         et_coll = annual_coll_.filter(ee.Filter.date(s, e))
-        et_umrb = et_coll.sum().multiply(0.00001).clip(umrb_clip.geometry())
+        et_umrb = et_coll.sum().clip(umrb_clip.geometry())
 
         et_str = 'et_{}_{}'.format(yr, month)
         et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
         et = et_sum.rename(et_str)
 
         if month == 4:
-            bands = irr.addBands([et])
+            bands = et
         else:
             bands = bands.addBands([et])
 
@@ -280,9 +258,15 @@ def is_authorized():
 
 if __name__ == '__main__':
     is_authorized()
-    points = 'users/dgketchum/points/grid_5km_uinta'
-    roi = os.path.join(BOUNDARIES, 'UT')
-    bucket = 'wudr'
-    request_band_extract('uinta', points, roi, [2020])
 
+    points = 'users/dgketchum/expansion/points/study_uncult_points'
+    bucket = 'wudr'
+    request_band_extract('uinta', points, WESTERN_11_STATES, [2020])
+
+    extract = 'users/dgketchum/expansion/tables/uinta_2020'
+    ic = 'users/dgketchum/expansion/uinta'
+    target = 'et_2020_9'
+    # export_classification('uinta', extract, ic, roi, [2020], target=target)
+    pts = 'users/dgketchum/expansion/points/study_points'
+    # get_uncultivated_points(pts, 'study_uncult')
 # ========================= EOF ====================================================================
