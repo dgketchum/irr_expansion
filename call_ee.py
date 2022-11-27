@@ -5,6 +5,7 @@ from calendar import monthrange
 
 from pprint import pprint
 
+import pandas as pd
 import ee
 from ee_utils import get_world_climate, landsat_composites
 
@@ -59,13 +60,18 @@ def get_geomteries():
 
 def export_classification(out_name, table, asset_root, region, years, bag_fraction=0.5, target='et_2020_9',
                           input_props=None, min_irr_years=5):
+
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
     irr_min_yr_mask = remap.sum().gte(min_irr_years)
 
     fc = ee.FeatureCollection(table)
-    roi = ee.FeatureCollection(region)
+
+    if isinstance(region, ee.FeatureCollection):
+        roi = region
+    else:
+        roi = ee.FeatureCollection(region)
 
     classifier = ee.Classifier.smileRandomForest(
         numberOfTrees=150,
@@ -80,7 +86,8 @@ def export_classification(out_name, table, asset_root, region, years, bag_fracti
     trained_model = classifier.train(fc, target, input_props)
 
     for yr in years:
-
+        m = int(target.split('_')[-1])
+        end_day = monthrange(yr, m)[1]
         irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
         irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
 
@@ -97,9 +104,9 @@ def export_classification(out_name, table, asset_root, region, years, bag_fracti
         annual_stack = input_bands.select(input_props)
 
         classified_img = annual_stack.unmask().classify(trained_model).float().set({
-            'system:index': ee.Date('{}-01-01'.format(yr)).format('YYYYMMdd'),
-            'system:time_start': ee.Date('{}-01-01'.format(yr)).millis(),
-            'system:time_end': ee.Date('{}-12-31'.format(yr)).millis(),
+            'system:index': ee.Date('{}-{}-01'.format(yr, m)).format('YYYYMMdd'),
+            'system:time_start': ee.Date('{}-{}-01'.format(yr, m)).millis(),
+            'system:time_end': ee.Date('{}-{}-{}'.format(yr, m, end_day)).millis(),
             'date_ingested': str(date.today()),
             'image_name': out_name,
             'training_data': table,
@@ -107,13 +114,13 @@ def export_classification(out_name, table, asset_root, region, years, bag_fracti
             'target': target})
 
         classified_img = classified_img.clip(roi.geometry())
-        # classified_img = classified_img.mask(irr_mask)
+        classified_img = classified_img.mask(irr_mask)
         classified_img = classified_img.rename('estimate')
-        desc = '{}_{}_4'.format(out_name, yr)
+        desc = '{}_{}_{}'.format(out_name, yr, m)
         task = ee.batch.Export.image.toAsset(
             image=classified_img,
             description=desc,
-            assetId=os.path.join(asset_root, desc),
+            assetId=os.path.join(asset_root, target),
             scale=30,
             pyramidingPolicy={'.default': 'mean'},
             maxPixels=1e13)
@@ -122,7 +129,7 @@ def export_classification(out_name, table, asset_root, region, years, bag_fracti
         print(os.path.join(asset_root, desc))
 
 
-def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None):
+def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None, terrain=False):
     """
     Extract raster values from a points kml file in Fusion Tables. Send annual extracts .csv to GCS wudr bucket.
     Concatenate them using map.tables.concatenate_band_extract().
@@ -132,13 +139,21 @@ def request_band_extract(file_prefix, points_layer, region, years, filter_bounds
     :param filter_bounds: Restrict extract to within a geographic extent.
     :return:
     """
-    roi = ee.FeatureCollection(region)
+    if isinstance(region, ee.FeatureCollection):
+        roi = region
+    else:
+        roi = ee.FeatureCollection(region)
+
     if buffer:
         roi = ee.Feature(roi.first()).buffer(buffer)
         roi = ee.FeatureCollection([roi])
+
     points = ee.FeatureCollection(points_layer)
     for yr in years:
-        stack = stack_bands(yr, roi)
+        if terrain:
+            stack = stack_bands(yr, roi)
+        else:
+            stack = irr_et_data(yr)
 
         if filter_bounds:
             points = points.filterBounds(roi)
@@ -259,14 +274,20 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    points = 'users/dgketchum/expansion/points/study_uncult_points'
+    points_ = 'users/dgketchum/expansion/points/study_uncult_points'
     bucket = 'wudr'
-    request_band_extract('uinta', points, WESTERN_11_STATES, [2020])
+    # request_band_extract('domain', points_, WESTERN_11_STATES, [x for x in range(1987, 2019)], terrain=False)
 
-    extract = 'users/dgketchum/expansion/tables/uinta_2020'
-    ic = 'users/dgketchum/expansion/uinta'
-    target = 'et_2020_9'
-    # export_classification('uinta', extract, ic, roi, [2020], target=target)
-    pts = 'users/dgketchum/expansion/points/study_points'
-    # get_uncultivated_points(pts, 'study_uncult')
+    fc = ee.FeatureCollection(CORB_CLIP).merge(ee.FeatureCollection(UMRB_CLIP)).merge(ee.FeatureCollection(CMBRB_CLIP))
+    extract = 'users/dgketchum/expansion/tables/domain_2020'
+    ic = 'users/dgketchum/expansion/naturalized_et'
+
+    df = pd.read_csv('/home/dgketchum/Downloads/domain_2020.csv')
+    exclude = ['system:index', 'MGRS_TILE', 'id', 'study_uncu', '.geo']
+    targets = [x for x in df.columns if 'et_2020' in x]
+    props = [x for x in df.columns if x not in targets]
+    props = [x for x in props if x not in exclude]
+    for t in targets:
+        export_classification('naturalized_et', extract, ic, fc, [2019], target=t, input_props=props)
+
 # ========================= EOF ====================================================================
