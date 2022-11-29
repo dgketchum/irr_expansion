@@ -3,11 +3,8 @@ import sys
 from datetime import date
 from calendar import monthrange
 
-from pprint import pprint
-
-import pandas as pd
 import ee
-from ee_utils import get_world_climate, landsat_composites
+import pandas as pd
 
 sys.path.insert(0, os.path.abspath('..'))
 
@@ -58,75 +55,58 @@ def get_geomteries():
     return uinta, test_point
 
 
-def export_classification(out_name, table, asset_root, region, years, bag_fraction=0.5, target='et_2020_9',
-                          input_props=None, min_irr_years=5):
-
+def export_classification(extract, asset_root, region, years, input_props, bag_fraction=0.5, min_irr_years=5):
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
     irr_min_yr_mask = remap.sum().gte(min_irr_years)
 
-    fc = ee.FeatureCollection(table)
-
-    if isinstance(region, ee.FeatureCollection):
-        roi = region
-    else:
-        roi = ee.FeatureCollection(region)
-
-    classifier = ee.Classifier.smileRandomForest(
-        numberOfTrees=150,
-        minLeafPopulation=1,
-        bagFraction=bag_fraction).setOutputMode('REGRESSION')
-
-    if not input_props:
-        input_props = fc.first().propertyNames().remove('system:index').remove('id')
-    else:
-        input_props = ee.List(input_props)
-
-    trained_model = classifier.train(fc, target, input_props)
-
     for yr in years:
-        m = int(target.split('_')[-1])
-        end_day = monthrange(yr, m)[1]
-        irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
-        irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
+        for m in range(4, 11):
+            target = 'et_{}_{}'.format(yr, m)
+            cols = input_props + [target]
+            extract_path = extract.format(yr)
+            fc = ee.FeatureCollection(extract_path).select(cols)
+            roi = ee.FeatureCollection(region)
 
-        input_bands = stack_bands(yr, roi)
+            classifier = ee.Classifier.smileRandomForest(
+                numberOfTrees=150,
+                minLeafPopulation=1,
+                bagFraction=bag_fraction).setOutputMode('REGRESSION')
 
-        b, p = input_bands.bandNames().getInfo(), input_props.getInfo()
-        check = [x for x in p if x not in b]
-        if check:
-            pprint(check)
-            revised = [f for f in p if f not in check]
-            input_props = ee.List(revised)
             trained_model = classifier.train(fc, target, input_props)
 
-        annual_stack = input_bands.select(input_props)
+            irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
+            irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
 
-        classified_img = annual_stack.unmask().classify(trained_model).float().set({
-            'system:index': ee.Date('{}-{}-01'.format(yr, m)).format('YYYYMMdd'),
-            'system:time_start': ee.Date('{}-{}-01'.format(yr, m)).millis(),
-            'system:time_end': ee.Date('{}-{}-{}'.format(yr, m, end_day)).millis(),
-            'date_ingested': str(date.today()),
-            'image_name': out_name,
-            'training_data': table,
-            'bag_fraction': bag_fraction,
-            'target': target})
+            input_bands = stack_bands(yr, roi)
+            image_stack = input_bands.select(input_props + [target])
 
-        classified_img = classified_img.clip(roi.geometry())
-        classified_img = classified_img.mask(irr_mask)
-        classified_img = classified_img.rename('estimate')
-        desc = '{}_{}_{}'.format(out_name, yr, m)
-        task = ee.batch.Export.image.toAsset(
-            image=classified_img,
-            description=desc,
-            assetId=os.path.join(asset_root, target),
-            scale=30,
-            pyramidingPolicy={'.default': 'mean'},
-            maxPixels=1e13)
+            desc = 'nat_et_{}_{}'.format(yr, m)
 
-        task.start()
-        print(os.path.join(asset_root, desc))
+            classified_img = image_stack.unmask().classify(trained_model).float().set({
+                'system:index': ee.Date('{}-{}-01'.format(yr, m)).format('YYYYMMdd'),
+                'system:time_start': ee.Date('{}-{}-01'.format(yr, m)).millis(),
+                'system:time_end': ee.Date('{}-{}-{}'.format(yr, m, monthrange(yr, m)[1])).millis(),
+                'date_ingested': str(date.today()),
+                'image_name': desc,
+                'training_data': extract,
+                'bag_fraction': bag_fraction,
+                'target': target})
+
+            classified_img = classified_img.clip(roi.geometry())
+            classified_img = classified_img.mask(irr_mask)
+            classified_img = classified_img.rename(desc)
+            task = ee.batch.Export.image.toAsset(
+                image=classified_img,
+                description=desc,
+                assetId=os.path.join(asset_root, target),
+                scale=30,
+                pyramidingPolicy={'.default': 'mean'},
+                maxPixels=1e13)
+
+            task.start()
+            print(os.path.join(asset_root, desc))
 
 
 def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None, terrain=False):
@@ -274,20 +254,26 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
+    rt = '/home/dgketchum/Downloads/bands'
+    rto = '/home/dgketchum/Downloads/bands_'
+    l = [os.path.join(rt, x) for x in os.listdir(rt)]
+    for c in l:
+        print(os.path.basename(c))
+        df = pd.read_csv(c)
+        print(df.shape)
+        df.dropna(inplace=True)
+        print(df.shape)
+        df.to_csv(os.path.join(rto, os.path.basename(c)))
+
     points_ = 'users/dgketchum/expansion/points/study_uncult_points'
     bucket = 'wudr'
     # request_band_extract('domain', points_, WESTERN_11_STATES, [x for x in range(1987, 2019)], terrain=False)
 
     fc = ee.FeatureCollection(CORB_CLIP).merge(ee.FeatureCollection(UMRB_CLIP)).merge(ee.FeatureCollection(CMBRB_CLIP))
-    extract = 'users/dgketchum/expansion/tables/domain_2020'
+    extract_ = 'users/dgketchum/expansion/tables/domain_{}'
     ic = 'users/dgketchum/expansion/naturalized_et'
 
-    df = pd.read_csv('/home/dgketchum/Downloads/domain_2020.csv')
-    exclude = ['system:index', 'MGRS_TILE', 'id', 'study_uncu', '.geo']
-    targets = [x for x in df.columns if 'et_2020' in x]
-    props = [x for x in df.columns if x not in targets]
-    props = [x for x in props if x not in exclude]
-    for t in targets:
-        export_classification('naturalized_et', extract, ic, fc, [2019], target=t, input_props=props)
+    props = ['aspect', 'elevation', 'lat', 'lon', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
+    export_classification(extract_, ic, fc, [2018], input_props=props)
 
 # ========================= EOF ====================================================================
