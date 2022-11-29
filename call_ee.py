@@ -109,7 +109,7 @@ def export_classification(extract, asset_root, region, years, input_props, bag_f
             print(os.path.join(asset_root, desc))
 
 
-def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False, buffer=None, terrain=False):
+def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False):
     """
     Extract raster values from a points kml file in Fusion Tables. Send annual extracts .csv to GCS wudr bucket.
     Concatenate them using map.tables.concatenate_band_extract().
@@ -119,22 +119,10 @@ def request_band_extract(file_prefix, points_layer, region, years, filter_bounds
     :param filter_bounds: Restrict extract to within a geographic extent.
     :return:
     """
-    if isinstance(region, ee.FeatureCollection):
-        roi = region
-    else:
-        roi = ee.FeatureCollection(region)
-
-    if buffer:
-        roi = ee.Feature(roi.first()).buffer(buffer)
-        roi = ee.FeatureCollection([roi])
-
+    roi = ee.FeatureCollection(region)
     points = ee.FeatureCollection(points_layer)
     for yr in years:
-        if terrain:
-            stack = stack_bands(yr, roi)
-        else:
-            stack = irr_et_data(yr)
-
+        stack = stack_bands(yr, roi)
         if filter_bounds:
             points = points.filterBounds(roi)
 
@@ -254,26 +242,15 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    rt = '/home/dgketchum/Downloads/bands'
-    rto = '/home/dgketchum/Downloads/bands_'
-    l = [os.path.join(rt, x) for x in os.listdir(rt)]
-    for c in l:
-        print(os.path.basename(c))
-        df = pd.read_csv(c)
-        print(df.shape)
-        df.dropna(inplace=True)
-        print(df.shape)
-        df.to_csv(os.path.join(rto, os.path.basename(c)))
-
     points_ = 'users/dgketchum/expansion/points/study_uncult_points'
     bucket = 'wudr'
-    # request_band_extract('domain', points_, WESTERN_11_STATES, [x for x in range(1987, 2019)], terrain=False)
+    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    # request_band_extract('domain', points_, clip, [x for x in range(1987, 2019)])
 
-    fc = ee.FeatureCollection(CORB_CLIP).merge(ee.FeatureCollection(UMRB_CLIP)).merge(ee.FeatureCollection(CMBRB_CLIP))
     extract_ = 'users/dgketchum/expansion/tables/domain_{}'
     ic = 'users/dgketchum/expansion/naturalized_et'
 
     props = ['aspect', 'elevation', 'lat', 'lon', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
-    export_classification(extract_, ic, fc, [2018], input_props=props)
+    export_classification(extract_, ic, clip, [2018, 2017], input_props=props)
 
 # ========================= EOF ====================================================================
