@@ -68,6 +68,16 @@ def select_grid_points(fields_dir, study_area, out_shp):
         df.to_file(out_shp)
 
 
+def prep_extracts(in_dir, out_dir):
+
+    l = [os.path.join(in_dir, x) for x in os.listdir(in_dir)]
+    for c in l:
+        print(os.path.basename(c))
+        df = pd.read_csv(c)
+        print(df.shape)
+        df.dropna(inplace=True)
+        print(df.shape)
+        df.to_csv(os.path.join(out_dir, os.path.basename(c)), index=False)
 
 
 if __name__ == '__main__':
