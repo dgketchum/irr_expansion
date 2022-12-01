@@ -251,6 +251,6 @@ if __name__ == '__main__':
     ic = 'users/dgketchum/expansion/naturalized_et'
 
     props = ['aspect', 'elevation', 'lat', 'lon', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
-    export_classification(extract_, ic, clip, [2018, 2017], input_props=props)
+    export_classification(extract_, ic, clip, [x for x in range(2000, 2016)], input_props=props)
 
 # ========================= EOF ====================================================================
