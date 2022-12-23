@@ -90,12 +90,12 @@ if __name__ == '__main__':
     out_shp = os.path.join(grids, 'grid_5km.shp')
     tables = os.path.join(gis, 'tables', 'points_extracts')
     csv = os.path.join(tables, 'uinta_2020.csv')
-    # join_shp_csv(shp, grids, out_shp, glob='study_uncult.csv', rename_map=None)
+    join_shp_csv(shp, grids, out_shp, glob='study_uncult.csv', rename_map=None)
 
     grid_pts_ = os.path.join(grids, 'grid_5km_uncult_attr_wgs.shp')
     fields_dir_ = '/media/research/IrrigationGIS/openET/OpenET_GeoDatabase'
     study_area_ = '/media/research/IrrigationGIS/expansion/shapefiles/study_area_wgs.shp'
     out_shp_ = '/media/research/IrrigationGIS/expansion/shapefiles/study_area_field_centroids.shp'
-    select_grid_points(fields_dir_, study_area_, out_shp_)
+    # select_grid_points(fields_dir_, study_area_, out_shp_)
 
 # ========================= EOF ====================================================================
