@@ -62,6 +62,9 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
 
+    eff_ppt_coll = ee.ImageCollection('users/dgketchum/expansion/naturalized_et')
+    eff_ppt_coll = eff_ppt_coll.map(lambda x: x.rename('et'))
+
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
@@ -69,6 +72,8 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
 
     for yr in years:
         for month in range(1, 13):
+            if month not in [4, 5, 6, 8, 7]:
+                continue
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -94,14 +99,14 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
             et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
             et = et_sum.mask(irr_mask)
 
-            eff_ppt = ee.ImageCollection('users/dgketchum/expansion/naturalized_et')
-            eff_ppt = eff_ppt.filterDate(s, e).select('nat_et_{}_{}'.format(yr, month)).first()
-            eff_ppt = eff_ppt.mask(irr_mask)
+            eff_ppt = eff_ppt_coll.filterDate(s, e).select('et').mosaic().multiply(0.00001)
+            eff_ppt = eff_ppt.mask(irr_mask).rename('eff_ppt')
 
             ppt, etr = extract_gridmet_monthly(yr, month)
 
             irr_mask = irr_mask.reproject(crs='EPSG:5070', scale=30)
             et = et.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
+            eff_ppt = eff_ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
             ppt = ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
             etr = etr.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
 
@@ -110,13 +115,14 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
             area = ee.Image.pixelArea()
             irr = irr_mask.multiply(area).rename('irr')
             et = et.multiply(area).rename('et')
+            eff_ppt = eff_ppt.multiply(area).rename('eff_ppt')
             cc = cc.multiply(area).rename('cc')
             ppt = ppt.multiply(area).rename('ppt')
             etr = etr.multiply(area).rename('etr')
 
             if yr > 1986 and month in np.arange(4, 11):
-                bands = irr.addBands([et, cc, ppt, etr])
-                select_ = ['STAID', 'irr', 'et', 'cc', 'ppt', 'etr']
+                bands = irr.addBands([et, cc, ppt, etr, eff_ppt])
+                select_ = ['STAID', 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt']
             else:
                 bands = ppt.addBands([etr])
                 select_ = ['STAID', 'ppt', 'etr']
@@ -172,5 +178,5 @@ if __name__ == '__main__':
 
     # extract_point_data(points, bucket, [2020], 'uinta', debug=
 
-    export_gridded_data(basins, bucket, list(range(1991, 2022)), 'et_interp', min_years=5, debug=False)
+    export_gridded_data(basins, bucket, list(range(1982, 1991)), 'et_interp', min_years=5, debug=False)
 # ========================= EOF ================================================================================
