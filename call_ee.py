@@ -93,7 +93,7 @@ def export_classification(extract, asset_root, region, years, input_props,
                 'system:time_end': ee.Date('{}-{}-{}'.format(yr, m, monthrange(yr, m)[1])).millis(),
                 'date_ingested': str(date.today()),
                 'image_name': desc,
-                'training_data': extract,
+                'training_data': extract_path,
                 'bag_fraction': bag_fraction,
                 'target': target})
 
@@ -169,28 +169,24 @@ def stack_bands(yr, roi):
     tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150')
     input_bands = input_bands.addBands([terrain, tpi_1250, tpi_250, tpi_150])
 
-    et = irr_et_data(yr)
-    input_bands = input_bands.addBands([et])
-
-    input_bands = input_bands.clip(roi)
-
-    standard_names = []
-    temp_ct = 1
-    prec_ct = 1
-    names = input_bands.bandNames().getInfo()
-    for name in names:
-        if 'tavg' in name and 'tavg' in standard_names:
-            standard_names.append('tavg_{}'.format(temp_ct))
-            temp_ct += 1
-        elif 'prec' in name and 'prec' in standard_names:
-            standard_names.append('prec_{}'.format(prec_ct))
-            prec_ct += 1
-        elif 'nd_cy' in name:
-            standard_names.append('nd_max_cy')
+    ppt, etr = None, None
+    first = True
+    for m in range(1, 13):
+        if m > 9:
+            y = yr - 1
+            ppt_, etr_ = extract_gridmet_monthly(y, m)
         else:
-            standard_names.append(name)
+            ppt_, etr_ = extract_gridmet_monthly(yr, m)
+        if first:
+            ppt, etr = ppt_, etr_
+            first = False
+        else:
+            ppt = ppt.addBands([ppt_])
+            etr = etr.addBands([etr_])
 
-    input_bands = input_bands.rename(standard_names)
+    et = irr_et_data(yr)
+    input_bands = input_bands.addBands([et, ppt, etr])
+    input_bands = input_bands.clip(roi)
     return input_bands
 
 
@@ -247,7 +243,6 @@ def extract_point_data(tables, bucket, years, description, features=None, min_ye
     :param min_years:
     :return:
     """
-    initialize()
     fc = ee.FeatureCollection(tables)
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
@@ -316,7 +311,6 @@ def extract_point_data(tables, bucket, years, description, features=None, min_ye
 
 
 def extract_ndvi_change(tables, bucket, features=None):
-    initialize()
     fc = ee.FeatureCollection(tables)
     if features:
         fc = fc.filter(ee.Filter.inList('STAID', features))
@@ -423,6 +417,19 @@ def landsat_masked(start_year, end_year, doy_start, doy_end, roi):
     return lsSR_masked
 
 
+def extract_gridmet_monthly(year, month):
+    m_str, m_str_next = str(month).rjust(2, '0'), str(month + 1).rjust(2, '0')
+    if month == 12:
+        dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
+                                                                        '{}-{}-31'.format(year, m_str))
+    else:
+        dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
+                                                                        '{}-{}-01'.format(year, m_str_next))
+    pet = dataset.select('etr').sum().multiply(0.001).rename('etr_{}_{}'.format(year, month))
+    ppt = dataset.select('pr').sum().multiply(0.001).rename('ppt_{}_{}'.format(year, month))
+    return ppt, pet
+
+
 def is_authorized():
     try:
         ee.Initialize()
@@ -439,7 +446,7 @@ if __name__ == '__main__':
     points_ = 'users/dgketchum/expansion/points/study_uncult_points'
     bucket = 'wudr'
     clip = 'users/dgketchum/expansion/study_area_dissolve'
-    # request_band_extract('domain', points_, clip, [x for x in range(1987, 2019)])
+    request_band_extract('bands_26DEC2022', points_, clip, [x for x in range(1987, 2021)])
 
     extract_ = 'users/dgketchum/expansion/tables/domain_{}'
     ic = 'users/dgketchum/expansion/naturalized_et'
@@ -448,6 +455,6 @@ if __name__ == '__main__':
     years_ = [x for x in range(1991, 1994)]
     years_.reverse()
 
-    export_classification(extract_, ic, clip, years_, input_props=props)
+    # export_classification(extract_, ic, clip, years_, input_props=props)
 
 # ========================= EOF ====================================================================
