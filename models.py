@@ -1,19 +1,14 @@
 import os
 import sys
-from pprint import pprint
-from time import time
-from subprocess import call
 from copy import deepcopy
 
 import numpy as np
-from numpy import dot, mean, flatnonzero, ones_like, where, zeros_like
-from pandas import read_csv, concat, DataFrame
-from scipy.stats import randint as sp_randint
-from sklearn.decomposition import PCA
+from numpy import ones_like, where, zeros_like
+from pandas import read_csv, DataFrame
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import confusion_matrix
-from sklearn.tree import export_graphviz
-from sklearn.model_selection import RandomizedSearchCV, GridSearchCV, train_test_split, KFold
+from sklearn.model_selection import train_test_split
+from scipy.stats import linregress
+from sklearn.metrics import mean_squared_error
 
 from geopandas import GeoDataFrame
 from shapely.geometry import Point
@@ -23,39 +18,45 @@ sys.path.append(abspath)
 
 INT_COLS = ['POINT_TYPE', 'YEAR', 'classification']
 CLASS_NAMES = ['IRR', 'DRYL', 'WETl', 'UNCULT']
+PROPS = ['aspect', 'elevation', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
+DROP = ['MGRS_TILE', '.geo', 'system:index', 'et_2020_10', 'et_2020_4',
+        'et_2020_5', 'et_2020_6', 'et_2020_7', 'et_2020_9', 'study_uncu', 'id']
 
 
-def random_forest(csv, n_estimators=50, out_shape=None):
+def random_forest(csv, n_estimators=50, out_shape=None, year=2020):
     if not isinstance(csv, DataFrame):
         print('\n', csv)
         c = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
     else:
         c = csv
 
-    c = c[c['irr_2020'] == 2]
     split = int(c.shape[0] * 0.7)
 
-    df = deepcopy(c.loc[:split, :])
-    et_cols = [x for x in df.columns if 'et_2020' in x]
-    target = et_cols[-2]
-    y = df[target].values
-    df.drop(columns=et_cols + ['.geo', 'system:index'], inplace=True)
-    df.dropna(axis=1, inplace=True)
-    x = df.values
+    for m in range(4, 11):
+        df = deepcopy(c.loc[:split, :])
+        target = 'et_{}_{}'.format(year, m)
+        y = df[target].values
+        df.drop(columns=DROP + [target], inplace=True)
+        df.dropna(axis=1, inplace=True)
+        x = df.values
 
-    val = deepcopy(c.loc[split:, :])
-    y_test = val[target].values
-    geo = val.apply(lambda x: Point(x['Lon_GCS'], x['LAT_GCS']), axis=1)
-    val.drop(columns=et_cols + ['.geo', 'system:index'], inplace=True)
-    val.dropna(axis=1, inplace=True)
-    x_test = val.values
+        val = deepcopy(c.loc[split:, :])
+        y_test = val[target].values
+        geo = val.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
+        val.drop(columns=DROP + [target], inplace=True)
+        val.dropna(axis=1, inplace=True)
+        x_test = val.values
 
-    rf = RandomForestRegressor(n_estimators=n_estimators,
-                               n_jobs=-1,
-                               bootstrap=True)
+        rf = RandomForestRegressor(n_estimators=n_estimators,
+                                   n_jobs=-1,
+                                   bootstrap=True)
 
-    rf.fit(x, y)
-    y_pred = rf.predict(x_test)
+        rf.fit(x, y)
+        y_pred = rf.predict(x_test)
+        lr = linregress(y_test, y_pred)
+        rmse = mean_squared_error(y_test, y_pred, squared=False)
+        print('month {}, r: {:.3f}, rmse: {:.3f}'.format(m, lr.rvalue, rmse))
+
     if out_shape:
         val['label'] = y_test
         val['label'] = val['label'].apply(lambda x: x if x > 0 else np.nan)
@@ -65,10 +66,6 @@ def random_forest(csv, n_estimators=50, out_shape=None):
 
         d = (y_pred - y_test) / (y_test + 0.0001)
         val['diff'] = np.where(y_test == 0, np.nan, d)
-
-        ones = ones_like(y_test)
-        zeros = zeros_like(y_test)
-        val['corr'] = where(y_pred == y_test, ones, zeros)
 
         gdf = GeoDataFrame(val, geometry=geo, crs="EPSG:4326")
         gdf.to_file(out_shape)
@@ -135,14 +132,13 @@ def find_rf_variable_importance(csv, target, out_csv=None, drop=None, n_features
 
 if __name__ == '__main__':
     home = os.path.expanduser('~')
-    root = '/media/research/IrrigationGIS/expansion/tables/points_extracts'
+    root = '/media/research/IrrigationGIS/expansion'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS/expansion/tables/points_extracts'
+        root = '/home/dgketchum/data/IrrigationGIS'
 
-    c = os.path.join(root, 'uinta_2020.csv')
-    out = os.path.join(root, 'uinta_2020_select.csv')
-    s = os.path.join(root, 'uinta_2020.shp')
-    find_rf_variable_importance(out, target='et_2020_9', out_csv=None,
-                                drop=['.geo', 'system:index', 'et_2020_10', 'et_2020_4',
-                                      'et_2020_5', 'et_2020_6', 'et_2020_7', 'et_2020_8'])
+    d = os.path.join(root, 'tables', 'band_extracts', 'bands_29NOV2022')
+    c = os.path.join(d, 'domain_2020.csv')
+    out = os.path.join(d, 'domain_2020_select.csv')
+    s = os.path.join(d, 'domain_2020.shp')
+    random_forest(c, year=2020)
 # ========================= EOF ====================================================================
