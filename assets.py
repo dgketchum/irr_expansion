@@ -86,6 +86,13 @@ def check_assets(_dir, yr_start=1987, yr_end=2021, months=(4, 5, 6, 7, 8, 9, 10)
     pprint(missing)
 
 
+def set_metadata(ee_asset, string):
+    cmd = ['{}'.format(EE), 'asset', 'set',
+           '-p', 'image_name={}'.format(string), ee_asset]
+    print(' '.join(cmd))
+    check_call(cmd)
+
+
 if __name__ == '__main__':
     is_authorized()
     _bucket = 'gs://wudr'
@@ -96,8 +103,13 @@ if __name__ == '__main__':
     dp = 'users/dpendergraph/expansion/naturalized_et'
     kj = 'users/kelseyjencso/naturalized_et'
     dk = 'users/dgketchum/expansion/naturalized_et'
-    check_assets(dk)
-    # move_assets(kj, dk)
+    # check_assets(dk)
+    move_assets(dp, dk)
+    # for m in [4, 5, 6, 8]:
+    #     year = 2019
+    #     srepr = 'nat_et_{}_{}'.format(year, m)
+    #     asset = 'users/dgketchum/expansion/naturalized_et/et_{}_{}'.format(year, m)
+    #     set_metadata(asset, srepr)
 
     ee_dir = 'users/dgketchum/expansion/tables'
     rt = '/home/dgketchum/Downloads/bands_'

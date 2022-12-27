@@ -31,6 +31,7 @@ def plot_indices(meta, gridded_data, out_figs):
         df['ppt'] = (df['gm_ppt'] - df['gm_ppt'].min()) / (df['gm_ppt'].max() - df['gm_ppt'].min()) + 0.001
         df['etr'] = (df['gm_etr'] - df['gm_etr'].min()) / (df['gm_etr'].max() - df['gm_etr'].min()) + 0.001
         df = df[['q', 'cc', 'ppt', 'etr']]
+
         for x in range(1, 13):
             df['SPI_{}'.format(x)] = indices.spi(df['ppt'].values,
                                                  scale=x,
