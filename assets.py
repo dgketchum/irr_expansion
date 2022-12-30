@@ -4,9 +4,9 @@ from pprint import pprint
 from calendar import monthrange
 from subprocess import check_call, Popen, PIPE
 
-from call_ee import is_authorized
-
 import ee
+
+from call_ee import is_authorized
 
 home = os.path.expanduser('~')
 conda = os.path.join(home, 'miniconda3', 'envs')
@@ -36,20 +36,41 @@ def delete_asset(ee_asset_path):
     check_call(cmd)
 
 
-def push_bands_to_asset(_dir, glob, bucket):
-    shapes = []
-    local_f = os.path.join(_dir, 'domain_{}.csv'.format(glob))
-    bucket = os.path.join(bucket, 'expansion_bands')
-    _file = os.path.join(bucket, 'domain_{}.csv'.format(glob))
-    cmd = [GS, 'cp', local_f, _file]
-    check_call(cmd)
-    shapes.append(_file)
-    asset_ids = [os.path.basename(shp).split('.')[0] for shp in shapes]
-    ee_root = 'users/dgketchum/expansion/tables/'
-    for s, id_ in zip(shapes, asset_ids):
-        cmd = [EE, 'upload', 'table', '-f', '--asset_id={}{}'.format(ee_root, id_), s]
+def push_bands_to_asset(_dir, asset_folder, glob, bucket):
+    transferred, asset_ids = [], []
+    l = [os.path.join(_dir, x) for x in os.listdir(_dir) if glob in x]
+
+    for local_f in l:
+        base_ = os.path.basename(local_f)
+        gcs_file = os.path.join(bucket, base_)
+        cmd = [GS, 'cp', local_f, gcs_file]
         check_call(cmd)
-        print(id_, s)
+        # print(cmd)
+        transferred.append(gcs_file)
+        asset_id = os.path.join(asset_folder, base_.split('.')[0])
+        asset_ids.append(asset_id)
+
+    for gcs_file, asset_id in zip(transferred, asset_ids):
+        cmd = [EE, 'upload', 'table', '-f', '--asset_id={}'.format(asset_id), gcs_file]
+        check_call(cmd)
+        # print(cmd)
+
+
+def push_points_to_asset(_dir, state, bucket):
+    local_files = [os.path.join(_dir, '{}.{}'.format(state, ext)) for ext in
+                   ['shp', 'prj', 'shx', 'dbf']]
+    bucket = os.path.join(bucket, 'openet_field_centroids')
+    bucket_files = [os.path.join(bucket, '{}.{}'.format(state, ext)) for ext in
+                    ['shp', 'prj', 'shx', 'dbf']]
+    for lf, bf in zip(local_files, bucket_files):
+        cmd = [GS, 'cp', lf, bf]
+        check_call(cmd)
+
+    asset_id = os.path.basename(bucket_files[0]).split('.')[0]
+    ee_dst = 'users/dgketchum/openet/field_centroids/{}'.format(asset_id)
+    cmd = [EE, 'upload', 'table', '-f', '--asset_id={}'.format(ee_dst), bucket_files[0]]
+    check_call(cmd)
+    print(asset_id, bucket_files[0])
 
 
 def copy_asset(ee_asset, dst):
@@ -100,22 +121,13 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    dp = 'users/dpendergraph/expansion/naturalized_et'
-    kj = 'users/kelseyjencso/naturalized_et'
-    dk = 'users/dgketchum/expansion/naturalized_et'
-    # check_assets(dk)
-    move_assets(dp, dk)
-    # for m in [4, 5, 6, 8]:
-    #     year = 2019
-    #     srepr = 'nat_et_{}_{}'.format(year, m)
-    #     asset = 'users/dgketchum/expansion/naturalized_et/et_{}_{}'.format(year, m)
-    #     set_metadata(asset, srepr)
+    # d_ = os.path.join(root, 'openET', 'OpenET_GeoDatabase_centroids_5071')
+    # for s in ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
+    #     push_points_to_asset(d_, s, _bucket)
 
-    ee_dir = 'users/dgketchum/expansion/tables'
-    rt = '/home/dgketchum/Downloads/bands_'
-    # for yr in range(1987, 2022):
-    # asset_ = os.path.join(ee_dir, 'domain_{}'.format(yr))
-    # delete_asset(asset_)
-    # push_bands_to_asset(rt, glob=yr, bucket=_bucket)
+    asset_root = 'users/dgketchum/expansion/tables_28DEC2022'
+    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_28DEC2022')
+    dest = os.path.join(_bucket, 'expansion_bands')
+    push_bands_to_asset(bands_out, asset_root, 'bands_28DEC2022', dest)
 
 # ========================= EOF ====================================================================

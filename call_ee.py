@@ -6,6 +6,8 @@ from calendar import monthrange
 import ee
 import pandas as pd
 
+from cdl import get_cdl
+
 sys.path.insert(0, os.path.abspath('..'))
 
 sys.setrecursionlimit(2000)
@@ -17,6 +19,16 @@ CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
 BOUNDARIES = 'users/dgketchum/boundaries'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
+# generalize this
+TARGETS = ['et_{yr}_4', 'et_{yr}_5', 'et_{yr}_6', 'et_{yr}_7', 'et_{yr}_8', 'et_{yr}_9', 'et_{yr}_10']
+
+FEATURES = ['aspect', 'awc', 'clay', 'cwd_wy_smr', 'etr_{pyr}_10', 'etr_{pyr}_11', 'etr_{pyr}_12',
+            'etr_{yr}_1', 'etr_{yr}_2', 'etr_{yr}_3', 'etr_{yr}_4', 'etr_{yr}_5', 'etr_{yr}_6', 'etr_{yr}_7',
+            'etr_{yr}_8', 'etr_{yr}_9', 'ksat', 'pet_tot_wy_smr', 'ppt_{pyr}_10', 'ppt_{pyr}_11',
+            'ppt_{pyr}_12', 'ppt_{yr}_1', 'ppt_{yr}_2', 'ppt_{yr}_3', 'ppt_{yr}_4', 'ppt_{yr}_5', 'ppt_{yr}_6',
+            'ppt_{yr}_7', 'ppt_{yr}_8', 'ppt_{yr}_9', 'prec_tot_wy_smr', 'sand', 'slope', 'tmp_wy_smr', 'tpi_1250',
+            'tpi_150', 'tpi_250', 'ppt']
+
 
 def get_uncultivated_points(tables, file_prefix):
     fc = ee.FeatureCollection(tables)
@@ -24,8 +36,15 @@ def get_uncultivated_points(tables, file_prefix):
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.eq(2))
     remap = remap.sum().rename('uncult')
+    nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').first().rename('nlcd')
+    cdl_cult, cdl_crop, cdl_simple = get_cdl(2020)
+    cdl_crop = cdl_crop.rename('cdl')
+    ned = ee.Image('USGS/NED')
+    coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
+    slope = ee.Terrain.products(ned).select('slope')
+    bands = remap.addBands([cdl_crop, nlcd, slope, coords])
 
-    plot_sample_regions = remap.sampleRegions(
+    plot_sample_regions = bands.sampleRegions(
         collection=fc,
         scale=30,
         tileScale=16)
@@ -34,7 +53,7 @@ def get_uncultivated_points(tables, file_prefix):
     task = ee.batch.Export.table.toCloudStorage(
         plot_sample_regions,
         description=desc,
-        selectors=['uncult', 'id'],
+        selectors=['id', 'uncult', 'cdl', 'nlcd', 'slope'],
         bucket='wudr',
         fileNamePrefix='{}'.format(file_prefix),
         fileFormat='CSV')
@@ -55,42 +74,53 @@ def get_geomteries():
     return uinta, test_point
 
 
-def export_classification(extract, asset_root, region, years, input_props,
-                          bag_fraction=0.5, min_irr_years=5):
+def export_classification(extract, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
     irr_min_yr_mask = remap.sum().gte(min_irr_years)
 
     for yr in years:
-        for m in range(4, 11):
-            if yr == 1993 and m in [4, 5]:
-                continue
-            target = 'et_{}_{}'.format(yr, m)
+
+        targets = [t.format(yr=yr) for t in TARGETS]
+        input_props = []
+        for f in FEATURES:
+            try:
+                feat = f.format(yr=yr)
+            except KeyError:
+                feat = f.format(pyr=yr - 1)
+            except KeyError:
+                feat = f
+            input_props.append(feat)
+
+        extract_path = extract.format(yr)
+        roi = ee.FeatureCollection(region)
+        input_bands = stack_bands(yr, roi)
+
+        for target, month in zip(targets, range(4, 11)):
+
             cols = input_props + [target]
-            extract_path = extract.format(yr)
             fc = ee.FeatureCollection(extract_path).select(cols)
-            roi = ee.FeatureCollection(region)
 
             classifier = ee.Classifier.smileRandomForest(
                 numberOfTrees=150,
-                minLeafPopulation=1,
                 bagFraction=bag_fraction).setOutputMode('REGRESSION')
 
             trained_model = classifier.train(fc, target, input_props)
 
-            irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
-            irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
+            if irr_mask:
+                irr = irr_coll.filterDate('{}-01-01'.format(yr),
+                                          '{}-12-31'.format(yr)).select('classification').mosaic()
+                irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
 
-            input_bands = stack_bands(yr, roi)
             image_stack = input_bands.select(input_props + [target])
 
-            desc = 'nat_et_{}_{}'.format(yr, m)
+            desc = 'eff_ppt_{}_{}'.format(yr, month)
 
             classified_img = image_stack.unmask().classify(trained_model).float().set({
-                'system:index': ee.Date('{}-{}-01'.format(yr, m)).format('YYYYMMdd'),
-                'system:time_start': ee.Date('{}-{}-01'.format(yr, m)).millis(),
-                'system:time_end': ee.Date('{}-{}-{}'.format(yr, m, monthrange(yr, m)[1])).millis(),
+                'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
+                'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
+                'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
                 'date_ingested': str(date.today()),
                 'image_name': desc,
                 'training_data': extract_path,
@@ -98,18 +128,22 @@ def export_classification(extract, asset_root, region, years, input_props,
                 'target': target})
 
             classified_img = classified_img.clip(roi.geometry())
-            classified_img = classified_img.mask(irr_mask)
-            classified_img = classified_img.rename(desc)
+
+            if irr_mask:
+                classified_img = classified_img.mask(irr_mask)
+
+            classified_img = classified_img.rename('eff_ppt')
+            asset_id = os.path.join(asset_root, target)
             task = ee.batch.Export.image.toAsset(
                 image=classified_img,
                 description=desc,
-                assetId=os.path.join(asset_root, target),
+                assetId=asset_id,
                 scale=30,
                 pyramidingPolicy={'.default': 'mean'},
                 maxPixels=1e13)
 
             task.start()
-            print(os.path.join(asset_root, desc))
+            print(asset_id, target)
 
 
 def request_band_extract(file_prefix, points_layer, region, years, filter_bounds=False):
@@ -169,14 +203,42 @@ def stack_bands(yr, roi):
     tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150')
     input_bands = input_bands.addBands([terrain, tpi_1250, tpi_250, tpi_150])
 
+    water_year_start = '{}-10-01'.format(yr - 1)
+    spring_s, spring_e = '{}-03-01'.format(yr), '{}-05-01'.format(yr),
+    late_spring_s, late_spring_e = '{}-05-01'.format(yr), '{}-07-15'.format(yr)
+    summer_s, summer_e = '{}-07-15'.format(yr), '{}-09-30'.format(yr)
+
+    for s, e, n, m in [(spring_s, late_spring_e, 'spr', (3, 8)),
+                       (water_year_start, spring_e, 'wy_spr', (10, 5)),
+                       (water_year_start, summer_e, 'wy_smr', (10, 9))]:
+        gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
+            roi).filterDate(s, e).select('pr', 'eto', 'tmmn', 'tmmx')
+
+        temp = ee.Image(gridmet.select('tmmn').mean().add(gridmet.select('tmmx').mean()
+                                                          .divide(ee.Number(2))).rename('tmp_{}'.format(n)))
+        temp = temp.resample('bilinear').reproject(crs=proj['crs'], scale=30)
+
+        ai_sum = gridmet.select('pr', 'eto').reduce(ee.Reducer.sum()).rename(
+            'prec_tot_{}'.format(n), 'pet_tot_{}'.format(n)).resample('bilinear').reproject(crs=proj['crs'],
+                                                                                            scale=30)
+        wd_estimate = ai_sum.select('prec_tot_{}'.format(n)).subtract(ai_sum.select(
+            'pet_tot_{}'.format(n))).rename('cwd_{}'.format(n)).resample('bilinear').reproject(crs=proj['crs'],
+                                                                                               scale=30)
+        if n == 'wy_smr':
+            ppt = ai_sum.select('prec_tot_{}'.format(n)).rename('ppt')
+            input_bands = input_bands.addBands(ppt)
+
+        input_bands = input_bands.addBands([temp, ai_sum, wd_estimate])
+
     ppt, etr = None, None
     first = True
+    # TODO: get water year ppt and etr
     for m in range(1, 13):
         if m > 9:
             y = yr - 1
-            ppt_, etr_ = extract_gridmet_monthly(y, m)
+            ppt_, etr_ = extract_gridmet_monthly(y, m, proj)
         else:
-            ppt_, etr_ = extract_gridmet_monthly(yr, m)
+            ppt_, etr_ = extract_gridmet_monthly(yr, m, proj)
         if first:
             ppt, etr = ppt_, etr_
             first = False
@@ -184,9 +246,34 @@ def stack_bands(yr, roi):
             ppt = ppt.addBands([ppt_])
             etr = etr.addBands([etr_])
 
+    nlcd = ee.Image('USGS/NLCD/NLCD2011').select('landcover').reproject(crs=proj['crs'], scale=30).rename('nlcd')
+    cdl_cult, cdl_crop, cdl_simple = get_cdl(yr)
+    input_bands = input_bands.addBands([nlcd, cdl_cult, cdl_crop, cdl_simple])
+
+    awc = ee.Image('projects/openet/soil/ssurgo_AWC_WTA_0to152cm_composite').rename('awc')
+    clay = ee.Image('projects/openet/soil/ssurgo_Clay_WTA_0to152cm_composite').rename('clay')
+    ksat = ee.Image('projects/openet/soil/ssurgo_Ksat_WTA_0to152cm_composite').rename('ksat')
+    sand = ee.Image('projects/openet/soil/ssurgo_Sand_WTA_0to152cm_composite').rename('sand')
+
     et = irr_et_data(yr)
-    input_bands = input_bands.addBands([et, ppt, etr])
+    input_bands = input_bands.addBands([et, ppt, etr, awc, clay, ksat, sand])
     input_bands = input_bands.clip(roi)
+    standard_names = []
+    temp_ct = 1
+    prec_ct = 1
+    names = input_bands.bandNames().getInfo()
+
+    for name in names:
+        if 'tavg' in name and 'tavg' in standard_names:
+            standard_names.append('tavg_{}'.format(temp_ct))
+            temp_ct += 1
+        elif 'prec' in name and 'prec' in standard_names:
+            standard_names.append('prec_{}'.format(prec_ct))
+            prec_ct += 1
+        else:
+            standard_names.append(name)
+
+    input_bands = input_bands.rename(standard_names)
     return input_bands
 
 
@@ -417,7 +504,7 @@ def landsat_masked(start_year, end_year, doy_start, doy_end, roi):
     return lsSR_masked
 
 
-def extract_gridmet_monthly(year, month):
+def extract_gridmet_monthly(year, month, proj):
     m_str, m_str_next = str(month).rjust(2, '0'), str(month + 1).rjust(2, '0')
     if month == 12:
         dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
@@ -425,8 +512,12 @@ def extract_gridmet_monthly(year, month):
     else:
         dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
                                                                         '{}-{}-01'.format(year, m_str_next))
-    pet = dataset.select('etr').sum().multiply(0.001).rename('etr_{}_{}'.format(year, month))
-    ppt = dataset.select('pr').sum().multiply(0.001).rename('ppt_{}_{}'.format(year, month))
+    pet = dataset.select('etr').sum().multiply(0.001).rename('etr_{}_{}'.format(year, month)).resample(
+        'bilinear').reproject(crs=proj['crs'],
+                              scale=30)
+    ppt = dataset.select('pr').sum().multiply(0.001).rename('ppt_{}_{}'.format(year, month)).resample(
+        'bilinear').reproject(crs=proj['crs'],
+                              scale=30)
     return ppt, pet
 
 
@@ -443,18 +534,21 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    points_ = 'users/dgketchum/expansion/points/study_uncult_points'
+    points_ = 'users/dgketchum/expansion/points/sample_pts_filtered'
     bucket = 'wudr'
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
-    request_band_extract('bands_26DEC2022', points_, clip, [x for x in range(1987, 2021)])
-
-    extract_ = 'users/dgketchum/expansion/tables/domain_{}'
-    ic = 'users/dgketchum/expansion/naturalized_et'
-
-    props = ['aspect', 'elevation', 'lat', 'lon', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
-    years_ = [x for x in range(1991, 1994)]
+    # clip = 'users/dgketchum/expansion/study_area_dissolve'
+    clip = 'users/dgketchum/expansion/snake_plain'
+    years_ = [x for x in range(2017, 2022)]
     years_.reverse()
+    # request_band_extract('bands_28DEC2022', points_, clip, years_)
 
-    # export_classification(extract_, ic, clip, years_, input_props=props)
+    pts = 'users/dgketchum/expansion/pts_29DEC2022'
+    get_uncultivated_points(pts, 'sample_pts_29DEC2022')
+
+    extract_ = 'users/dgketchum/expansion/tables_28DEC2022/bands_28DEC2022_{}'
+    ic = 'users/dgketchum/expansion/eff_ppt_snake'
+
+    years_ = [2020]
+    # export_classification(extract_, ic, clip, years_, irr_mask=False)
 
 # ========================= EOF ====================================================================
