@@ -7,6 +7,7 @@ import ee
 import pandas as pd
 
 from cdl import get_cdl
+from ee_utils import get_world_climate
 
 sys.path.insert(0, os.path.abspath('..'))
 
@@ -168,16 +169,27 @@ def request_band_extract(file_prefix, points_layer, region, years, filter_bounds
             scale=30,
             tileScale=16)
 
+        plot_sample_regions = plot_sample_regions.randomColumn('rand')
+        one = plot_sample_regions.filter(ee.Filter.lt('rand', 0.5))
+        two = plot_sample_regions.filter(ee.Filter.gte('rand', 0.5))
+
         desc = '{}_{}'.format(file_prefix, yr)
         task = ee.batch.Export.table.toCloudStorage(
-            plot_sample_regions,
+            one,
             description=desc,
             bucket='wudr',
-            fileNamePrefix='{}_{}'.format(file_prefix, yr),
+            fileNamePrefix='{}_a_{}'.format(file_prefix, yr),
             fileFormat='CSV')
-
-        print(desc)
         task.start()
+
+        task = ee.batch.Export.table.toCloudStorage(
+            two,
+            description=desc,
+            bucket='wudr',
+            fileNamePrefix='{}_b_{}'.format(file_prefix, yr),
+            fileFormat='CSV')
+        task.start()
+        print(desc)
 
 
 def stack_bands(yr, roi):
@@ -207,10 +219,18 @@ def stack_bands(yr, roi):
     spring_s, spring_e = '{}-03-01'.format(yr), '{}-05-01'.format(yr),
     late_spring_s, late_spring_e = '{}-05-01'.format(yr), '{}-07-15'.format(yr)
     summer_s, summer_e = '{}-07-15'.format(yr), '{}-09-30'.format(yr)
+    winter_s, winter_e = '{}-01-01'.format(yr), '{}-03-01'.format(yr),
+    fall_s, fall_e = '{}-09-30'.format(yr), '{}-12-31'.format(yr)
 
     for s, e, n, m in [(spring_s, late_spring_e, 'spr', (3, 8)),
                        (water_year_start, spring_e, 'wy_spr', (10, 5)),
-                       (water_year_start, summer_e, 'wy_smr', (10, 9))]:
+                       (water_year_start, summer_e, 'wy_smr', (10, 9)),
+                       (spring_e, fall_s, 'gs', (5, 10)),
+                       (spring_s, spring_e, 'spr', (3, 5)),
+                       (late_spring_s, late_spring_e, 'lspr', (5, 7)),
+                       (summer_s, summer_e, 'sum', (7, 9)),
+                       (winter_s, winter_e, 'win', (1, 3))]:
+
         gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
             roi).filterDate(s, e).select('pr', 'eto', 'tmmn', 'tmmx')
 
@@ -224,27 +244,19 @@ def stack_bands(yr, roi):
         wd_estimate = ai_sum.select('prec_tot_{}'.format(n)).subtract(ai_sum.select(
             'pet_tot_{}'.format(n))).rename('cwd_{}'.format(n)).resample('bilinear').reproject(crs=proj['crs'],
                                                                                                scale=30)
+        worldclim_prec = get_world_climate(proj=proj, months=m, param='prec')
+        anom_prec = ai_sum.select('prec_tot_{}'.format(n)).subtract(worldclim_prec)
+        worldclim_temp = get_world_climate(proj=proj, months=m, param='tavg')
+        anom_temp = temp.subtract(worldclim_temp).rename('an_temp_{}'.format(n))
+
+        prec = ai_sum.select('prec_tot_{}'.format(n))
+        etr = ai_sum.select('pet_tot_{}'.format(n))
+
         if n == 'wy_smr':
             ppt = ai_sum.select('prec_tot_{}'.format(n)).rename('ppt')
             input_bands = input_bands.addBands(ppt)
 
-        input_bands = input_bands.addBands([temp, ai_sum, wd_estimate])
-
-    ppt, etr = None, None
-    first = True
-    # TODO: get water year ppt and etr
-    for m in range(1, 13):
-        if m > 9:
-            y = yr - 1
-            ppt_, etr_ = extract_gridmet_monthly(y, m, proj)
-        else:
-            ppt_, etr_ = extract_gridmet_monthly(yr, m, proj)
-        if first:
-            ppt, etr = ppt_, etr_
-            first = False
-        else:
-            ppt = ppt.addBands([ppt_])
-            etr = etr.addBands([etr_])
+        input_bands = input_bands.addBands([temp, ai_sum, wd_estimate, prec, etr, anom_prec, anom_temp])
 
     nlcd = ee.Image('USGS/NLCD/NLCD2011').select('landcover').reproject(crs=proj['crs'], scale=30).rename('nlcd')
     cdl_cult, cdl_crop, cdl_simple = get_cdl(yr)
@@ -504,23 +516,6 @@ def landsat_masked(start_year, end_year, doy_start, doy_end, roi):
     return lsSR_masked
 
 
-def extract_gridmet_monthly(year, month, proj):
-    m_str, m_str_next = str(month).rjust(2, '0'), str(month + 1).rjust(2, '0')
-    if month == 12:
-        dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
-                                                                        '{}-{}-31'.format(year, m_str))
-    else:
-        dataset = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate('{}-{}-01'.format(year, m_str),
-                                                                        '{}-{}-01'.format(year, m_str_next))
-    pet = dataset.select('etr').sum().multiply(0.001).rename('etr_{}_{}'.format(year, month)).resample(
-        'bilinear').reproject(crs=proj['crs'],
-                              scale=30)
-    ppt = dataset.select('pr').sum().multiply(0.001).rename('ppt_{}_{}'.format(year, month)).resample(
-        'bilinear').reproject(crs=proj['crs'],
-                              scale=30)
-    return ppt, pet
-
-
 def is_authorized():
     try:
         ee.Initialize()
@@ -534,16 +529,16 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    points_ = 'users/dgketchum/expansion/points/sample_pts_filtered'
+    points_ = 'users/dgketchum/expansion/points/sample_pts_29DEC2022_filtered'
     bucket = 'wudr'
-    # clip = 'users/dgketchum/expansion/study_area_dissolve'
-    clip = 'users/dgketchum/expansion/snake_plain'
-    years_ = [x for x in range(2017, 2022)]
+    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    # clip = 'users/dgketchum/expansion/snake_plain'
+    years_ = [x for x in range(1987, 2022)]
     years_.reverse()
-    # request_band_extract('bands_28DEC2022', points_, clip, years_)
+    request_band_extract('bands_29DEC2022', points_, clip, years_)
 
     pts = 'users/dgketchum/expansion/pts_29DEC2022'
-    get_uncultivated_points(pts, 'sample_pts_29DEC2022')
+    # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
 
     extract_ = 'users/dgketchum/expansion/tables_28DEC2022/bands_28DEC2022_{}'
     ic = 'users/dgketchum/expansion/eff_ppt_snake'

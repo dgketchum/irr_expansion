@@ -112,15 +112,14 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    d_ = os.path.join(root, 'openET', 'OpenET_GeoDatabase_centroids_5071')
-    pts = os.path.join(root, 'expansion', 'shapefiles', 'points_28DEC2022')
-    ishp = os.path.join(pts, 'sample.shp')
-    c = os.path.join(pts, 'sample_pts_28DEC2022.csv')
-    oshp = os.path.join(pts, 'sample_filtered.shp')
-    # join_csv_shapefile(ishp, c, oshp)
+    pts = os.path.join(root, 'expansion', 'shapefiles', 'points_29DEC2022')
+    ishp = os.path.join(pts, 'random_points.shp')
+    c = os.path.join(pts, 'sample_pts_29DEC2022.csv')
+    oshp = os.path.join(pts, 'sample_pts_29DEC2022.shp')
+    join_csv_shapefile(ishp, c, oshp)
 
     extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_28DEC2022')
     bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_28DEC2022')
-    prep_extracts(extracts, bands_out, clamp_et=True)
+    # prep_extracts(extracts, bands_out, clamp_et=True)
 
 # ========================= EOF ====================================================================
