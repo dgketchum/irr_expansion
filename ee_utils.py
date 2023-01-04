@@ -2,9 +2,12 @@ from datetime import datetime, timedelta
 
 import ee
 
+
 def get_world_climate(proj, months, param='prec'):
     if months[0] > months[1]:
         months = [x for x in range(months[0], 13)] + [x for x in range(1, months[1] + 1)]
+    elif months[0] == months[1]:
+        months = [x for x in range(1, 13)]
     else:
         months = [x for x in range(months[0], months[1] + 1)]
     months = [str(x).zfill(2) for x in months]

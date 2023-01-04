@@ -45,21 +45,27 @@ def join_csv_shapefile(in_shp, csv, out_shape, min_irr_years=20):
 
 
 def prep_extracts(in_dir, out_dir, clamp_et=False):
-    l = [os.path.join(in_dir, x) for x in os.listdir(in_dir)]
+    l = [os.path.join(in_dir, x) for x in os.listdir(in_dir) if x.endswith('.csv')]
     for c in l:
         print(os.path.basename(c))
         df = pd.read_csv(c)
         print(df.shape)
         yr = int(os.path.basename(c).split('.')[0][-4:])
-        df['ppt'] = df[['ppt_{}_{}'.format(yr, m) for m in range(1, 10)] +
-                       ['ppt_{}_{}'.format(yr - 1, m) for m in range(10, 13)]].sum(axis=1)
         et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
         df['season'] = df[et_cols].sum(axis=1) * 0.00001
 
         if clamp_et:
-            df = df[df['season'] < df['ppt']]
+            df = df[df['season'] < df['ppt_wy_et'] * 0.001]
+            DROP.append('season')
 
         df.dropna(inplace=True)
+        try:
+            d = ['STUSPS', '.geo', 'system:index', 'id', 'uncult', 'cdl', 'nlcd']
+            df.drop(columns=d, inplace=True)
+        except KeyError:
+            d = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
+            df.drop(columns=d, inplace=True)
+
         print(df.shape)
         df.to_csv(os.path.join(out_dir, os.path.basename(c)), index=False)
 
@@ -116,10 +122,10 @@ if __name__ == '__main__':
     ishp = os.path.join(pts, 'random_points.shp')
     c = os.path.join(pts, 'sample_pts_29DEC2022.csv')
     oshp = os.path.join(pts, 'sample_pts_29DEC2022.shp')
-    join_csv_shapefile(ishp, c, oshp)
+    # join_csv_shapefile(ishp, c, oshp)
 
-    extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_28DEC2022')
-    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_28DEC2022')
-    # prep_extracts(extracts, bands_out, clamp_et=True)
+    extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_29DEC2022')
+    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
+    prep_extracts(extracts, bands_out, clamp_et=True)
 
 # ========================= EOF ====================================================================

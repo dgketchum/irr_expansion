@@ -37,23 +37,24 @@ def delete_asset(ee_asset_path):
 
 
 def push_bands_to_asset(_dir, asset_folder, glob, bucket):
+    asset_pref = 'projects/earthengine-legacy/assets'
     transferred, asset_ids = [], []
     l = [os.path.join(_dir, x) for x in os.listdir(_dir) if glob in x]
+    existing = list_assets(asset_folder)
 
     for local_f in l:
         base_ = os.path.basename(local_f)
         gcs_file = os.path.join(bucket, base_)
         cmd = [GS, 'cp', local_f, gcs_file]
-        check_call(cmd)
-        # print(cmd)
         transferred.append(gcs_file)
-        asset_id = os.path.join(asset_folder, base_.split('.')[0])
-        asset_ids.append(asset_id)
+        asset_id = os.path.join(asset_pref, asset_folder, base_.split('.')[0])
+        if asset_id not in existing:
+            check_call(cmd)
+            asset_ids.append(asset_id)
 
     for gcs_file, asset_id in zip(transferred, asset_ids):
         cmd = [EE, 'upload', 'table', '-f', '--asset_id={}'.format(asset_id), gcs_file]
         check_call(cmd)
-        # print(cmd)
 
 
 def push_points_to_asset(_dir, state, bucket):
@@ -125,9 +126,9 @@ if __name__ == '__main__':
     # for s in ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
     #     push_points_to_asset(d_, s, _bucket)
 
-    asset_root = 'users/dgketchum/expansion/tables_28DEC2022'
-    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_28DEC2022')
+    asset_root = 'users/dgketchum/expansion/tables_29DEC2022'
+    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
     dest = os.path.join(_bucket, 'expansion_bands')
-    push_bands_to_asset(bands_out, asset_root, 'bands_28DEC2022', dest)
+    push_bands_to_asset(bands_out, asset_root, 'bands_29DEC2022', dest)
 
 # ========================= EOF ====================================================================
