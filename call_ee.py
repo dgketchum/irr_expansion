@@ -76,6 +76,7 @@ def get_geomteries():
 
 
 def export_classification(extract, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
+    proj = ee.Projection('EPSG:5071').getInfo()
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
@@ -91,9 +92,16 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
                 continue
 
             extract_path = extract.format(state, yr)
+
             input_bands = stack_bands(yr, roi)
             state_bound = ee.FeatureCollection(os.path.join(BOUNDARIES, state))
-            input_bands = input_bands.clip(state_bound)
+            input_bands = input_bands.clip(state_bound).resample('bilinear').reproject(crs=proj['crs'], scale=30)
+
+            if irr_mask:
+                irr = irr_coll.filterDate('{}-01-01'.format(yr),
+                                          '{}-12-31'.format(yr)).select('classification').mosaic()
+                irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
+                input_bands = input_bands.mask(irr_mask)
 
             for target, month in zip(targets, range(4, 11)):
 
@@ -106,16 +114,11 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
 
                 trained_model = classifier.train(fc, target, input_props)
 
-                if irr_mask:
-                    irr = irr_coll.filterDate('{}-01-01'.format(yr),
-                                              '{}-12-31'.format(yr)).select('classification').mosaic()
-                    irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
-
                 image_stack = input_bands.select(input_props + [target])
 
                 desc = 'eff_ppt_{}_{}_{}'.format(state, yr, month)
 
-                classified_img = image_stack.unmask().classify(trained_model).float().set({
+                classified_img = image_stack.classify(trained_model).int().set({
                     'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
                     'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
                     'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
@@ -125,13 +128,8 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
                     'bag_fraction': bag_fraction,
                     'target': target})
 
-                classified_img = classified_img.clip(roi.geometry())
-                classified_img = classified_img.clip(state_bound.geometry())
-
-                if irr_mask:
-                    classified_img = classified_img.mask(irr_mask)
-
                 classified_img = classified_img.rename('eff_ppt')
+
                 asset_id = os.path.join(asset_root, desc)
                 task = ee.batch.Export.image.toAsset(
                     image=classified_img,
@@ -194,12 +192,9 @@ def stack_bands(yr, roi):
     :return:
     """
 
-    proj = ee.Projection('EPSG:5071').getInfo()
-    input_bands = ee.Image.pixelLonLat().rename(['lon', 'lat']).resample('bilinear').reproject(crs=proj['crs'],
-                                                                                               scale=30)
+    input_bands = ee.Image.pixelLonLat().rename(['lon', 'lat'])
     ned = ee.Image('USGS/NED')
-    terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect') \
-        .resample('bilinear').reproject(crs=proj['crs'], scale=30)
+    terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
 
     elev = terrain.select('elevation')
     tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250')
@@ -223,25 +218,22 @@ def stack_bands(yr, roi):
                        (late_spring_s, late_spring_e, 'lspr', (5, 7)),
                        (summer_s, summer_e, 'sum', (7, 9)),
                        (winter_s, winter_e, 'win', (1, 3))]:
+
         gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
             roi).filterDate(s, e).select('pr', 'etr', 'tmmn', 'tmmx')
 
         temp = ee.Image(gridmet.select('tmmn').mean().add(gridmet.select('tmmx').mean()
                                                           .divide(ee.Number(2))).rename('tmp_{}'.format(n)))
 
-        temp = temp.resample('bilinear').reproject(crs=proj['crs'], scale=30)
+        ppt = gridmet.select('pr').reduce(ee.Reducer.sum()).rename('ppt_{}'.format(n))
 
-        ppt = gridmet.select('pr').reduce(ee.Reducer.sum()).rename('ppt_{}'.format(n)) \
-            .resample('bilinear').reproject(crs=proj['crs'], scale=30)
-
-        etr = gridmet.select('etr').reduce(ee.Reducer.sum()).rename('etr_{}'.format(n)) \
-            .resample('bilinear').reproject(crs=proj['crs'], scale=30)
+        etr = gridmet.select('etr').reduce(ee.Reducer.sum()).rename('etr_{}'.format(n))
 
         wd_estimate = ppt.subtract(etr).rename('cwd_{}'.format(n))
 
-        worldclim_prec = get_world_climate(proj=proj, months=m, param='prec')
+        worldclim_prec = get_world_climate(months=m, param='prec')
         anom_prec = ppt.subtract(worldclim_prec).rename('anm_ppt_{}'.format(n))
-        worldclim_temp = get_world_climate(proj=proj, months=m, param='tavg')
+        worldclim_temp = get_world_climate(months=m, param='tavg')
         anom_temp = temp.subtract(worldclim_temp).rename('anm_temp_{}'.format(n))
 
         input_bands = input_bands.addBands([temp, wd_estimate, ppt, etr, anom_prec, anom_temp])
@@ -503,7 +495,7 @@ if __name__ == '__main__':
     years_ = [x for x in range(1987, 2022)]
     years_.reverse()
     years_ = [2020]
-    request_band_extract('bands_29DEC2022', points_, clip, years_)
+    # request_band_extract('bands_29DEC2022', points_, clip, years_)
 
     pts = 'users/dgketchum/expansion/pts_29DEC2022'
     # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
@@ -512,6 +504,6 @@ if __name__ == '__main__':
     # ic = 'users/dgketchum/expansion/eff_ppt_snake'
     ic = 'users/dgketchum/expansion/eff_ppt'
     # clip = 'users/dgketchum/expansion/snake_plain'
-    # export_classification(extract_, ic, clip, years_, irr_mask=True)
+    export_classification(extract_, ic, clip, years_, irr_mask=True)
 
 # ========================= EOF ====================================================================
