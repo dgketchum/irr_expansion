@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import date
 
 import numpy as np
+import pandas as pd
 from pandas import read_csv, DataFrame
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -24,9 +25,31 @@ sys.path.append(abspath)
 PROPS = ['aspect', 'elevation', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
 
 
-def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
-                  show_importance=False, clamp_et=False):
+def study_wide_accuracy(dir_, glob, year, seed=1234):
+    first = True
+    for st in BASIN_STATES:
+        ff = os.path.join(dir_, '{}_{}_{}.csv'.format(glob, st, year))
+        if os.path.exists(ff):
+            c = random_forest(ff, year=year, show_importance=False, clamp_et=True, out_shape=None, seed=seed)
+            if first:
+                df = deepcopy(c)
+                first = False
+            else:
+                df = pd.concat([df, c], axis=0, ignore_index=True)
 
+    et_cols = ['et_{}_{}'.format(2020, mm) for mm in range(4, 11)]
+    et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
+    pred_gs = df[et_pred].sum(axis=1)
+    label_gs = df[et_cols].sum(axis=1)
+    season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
+    print('========================   OVERALL   ==========================')
+    print('mean ET', label_gs.mean())
+    print('rmse ', season_rmse / label_gs.mean() * 100., '%')
+    print('rmse', season_rmse)
+
+
+def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None,
+                  show_importance=False, clamp_et=False, seed=None):
     if not isinstance(csv, DataFrame):
         print('\n', csv)
         c = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
@@ -40,7 +63,6 @@ def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
     print(c.shape)
     if clamp_et:
         c = c[c['season'] < c['ppt_wy_et'] * 0.001]
-    print(c.shape)
 
     try:
         drop = ['uncult', 'season', 'STUSPS', '.geo', 'system:index', 'id', 'cdl', 'nlcd']
@@ -49,12 +71,12 @@ def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
         drop = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
         c.drop(columns=drop, inplace=True)
 
-    split = int(c.shape[0] * 0.7)
     val_df = None
+    print(c.shape)
 
     targets, features, first = [], None, True
     for m in range(4, 11):
-        df = deepcopy(c.loc[:split, :])
+        df = deepcopy(c)
         mstr = str(m)
         target = 'et_{}_{}'.format(year, m)
 
@@ -63,23 +85,18 @@ def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
         df.drop(columns=et_cols, inplace=True)
         x = df.values
         targets.append(target)
-        val = deepcopy(c.loc[split:, :])
 
         if first:
             features = list(df.columns)
-            geo = val.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
-            val_df = deepcopy(c.loc[split:, :])
+            geo = df.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
+            val_df = deepcopy(c)
             first = False
-
-        val.dropna(axis=0, inplace=True)
-        y_test = val[target].values
-        val.drop(columns=et_cols, inplace=True)
-        x_test = val.values
 
         rf = RandomForestRegressor(n_estimators=n_estimators,
                                    n_jobs=-1,
                                    bootstrap=True,
-                                   random_state=123)
+                                   oob_score=True,
+                                   random_state=seed)
 
         rf.fit(x, y)
 
@@ -88,20 +105,13 @@ def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
             imp = sorted(_list, key=lambda x: x[1], reverse=True)
             print([f[0] for f in imp[:10]])
 
-        y_pred = rf.predict(x_test)
-        lr = linregress(y_test, y_pred)
-        rmse = mean_squared_error(y_test, y_pred, squared=False)
-        print('{} r: {:.3f}, fractional: {:.3f}, rmse: {:.3f}\n'.format(mstr, lr.rvalue, rmse / y_test.mean(), rmse))
-
-        val_df['label_{}'.format(mstr)] = y_test
+        val_df['label_{}'.format(mstr)] = y
         val_df['label_{}'.format(mstr)] = val_df['label_{}'.format(mstr)].apply(lambda x: x if x > 0 else np.nan)
-
-        val_df['pred_{}'.format(mstr)] = y_pred
-        val_df['pred_{}'.format(mstr)] = np.where(y_test == 0, np.nan, y_pred)
-
-        d = y_pred - y_test
+        val_df['pred_{}'.format(mstr)] = rf.oob_prediction_
+        val_df['pred_{}'.format(mstr)] = np.where(y == 0, np.nan, rf.oob_prediction_)
+        d = y - rf.oob_prediction_
         d[np.abs(d) > 1] = np.nan
-        val_df['diff_{}'.format(mstr)] = np.where(y_test == 0, np.nan, d)
+        val_df['diff_{}'.format(mstr)] = np.where(y == 0, np.nan, d)
 
     et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
     pred_gs = val_df[et_pred].sum(axis=1)
@@ -122,6 +132,8 @@ def random_forest(csv, n_estimators=50, out_shape=None, year=2020, out_fig=None,
     if out_shape:
         gdf = GeoDataFrame(val_df, geometry=geo, crs='EPSG:4326')
         gdf.to_file(out_shape)
+
+    return val_df
 
 
 def plot_regressions(df, outfig):
@@ -255,9 +267,5 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS'
     extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts')
     r = os.path.join(extracts, 'bands_29DEC2022')
-
-    for st in BASIN_STATES:
-        ff = os.path.join(r, 'bands_29DEC2022_{}_2020.csv'.format(st))
-        if os.path.exists(ff):
-            random_forest(ff, year=2020, show_importance=True, clamp_et=True, out_shape=None)
+    study_wide_accuracy(r, 'bands_29DEC2022', 2020)
 # ========================= EOF ====================================================================
