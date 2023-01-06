@@ -69,7 +69,13 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
         c.drop(columns=drop, inplace=True)
     except KeyError:
         drop = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
-        c.drop(columns=drop, inplace=True)
+        if drop[2] in c.columns:
+            c.drop(columns=drop, inplace=True)
+        elif 'Unnamed: 0' in c.columns:
+            c.drop(columns=['Unnamed: 0', 'season'], inplace=True)
+        else:
+            drop = ['.geo', 'system:index', 'MGRS_TILE', 'id', 'study_uncu', 'season']
+            c.drop(columns=drop, inplace=True)
 
     val_df = None
     print(c.shape)
@@ -96,7 +102,8 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
                                    n_jobs=-1,
                                    bootstrap=True,
                                    oob_score=True,
-                                   random_state=seed)
+                                   random_state=seed,
+                                   min_samples_leaf=5)
 
         rf.fit(x, y)
 
@@ -106,12 +113,13 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
             print([f[0] for f in imp[:10]])
 
         val_df['label_{}'.format(mstr)] = y
-        val_df['label_{}'.format(mstr)] = val_df['label_{}'.format(mstr)].apply(lambda x: x if x > 0 else np.nan)
         val_df['pred_{}'.format(mstr)] = rf.oob_prediction_
-        val_df['pred_{}'.format(mstr)] = np.where(y == 0, np.nan, rf.oob_prediction_)
-        d = y - rf.oob_prediction_
-        d[np.abs(d) > 1] = np.nan
-        val_df['diff_{}'.format(mstr)] = np.where(y == 0, np.nan, d)
+        val_df['diff_{}'.format(mstr)] = rf.oob_prediction_ - y
+        rmse = mean_squared_error(y, rf.oob_prediction_, squared=False)
+        print('\n month {}'.format(mstr))
+        print('observed ET: {:.3f} m'.format(y.mean()))
+        print('rmse ET: {:.3f} mm'.format(rmse * 1000))
+        print('rmse {:.3f} %'.format(rmse / y.mean() * 100.))
 
     et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
     pred_gs = val_df[et_pred].sum(axis=1)
@@ -119,9 +127,8 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
     season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
     print('mean predicted ET: {:.3f} m'.format(pred_gs.mean()))
     print('mean observed ET: {:.3f} m'.format(label_gs.mean()))
-    print('mean difference ET: {:.3f} m'.format((pred_gs - label_gs).mean()))
-    print('seasonal rmse ET: {:.3f} m'.format(season_rmse))
-
+    print('seasonal rmse ET: {:.3f} mm'.format(season_rmse * 1000))
+    print('rmse: {:.3f}%'.format(season_rmse / label_gs.mean() * 100.))
     print('predicted {} targets: '.format(len(targets)))
     print(targets, '\n')
     print('predicted on {} features: '.format(len(features)))
@@ -267,5 +274,12 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS'
     extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts')
     r = os.path.join(extracts, 'bands_29DEC2022')
-    study_wide_accuracy(r, 'bands_29DEC2022', 2020)
+    # study_wide_accuracy(r, 'bands_29DEC2022', 2020)
+    prepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
+    study_area = os.path.join(prepped, 'bands_29DEC2022_all_2020.csv')
+    # random_forest(study_area)
+
+    original = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_29NOV2022')
+    original_domain = os.path.join(original, 'domain_2020.csv')
+    random_forest(original_domain)
 # ========================= EOF ====================================================================

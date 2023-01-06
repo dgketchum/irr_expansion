@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 import ee
 
 
-def get_world_climate(proj, months, param='prec'):
+def get_world_climate(months, param='prec'):
     if months[0] > months[1]:
         months = [x for x in range(months[0], 13)] + [x for x in range(1, months[1] + 1)]
     elif months[0] == months[1]:
@@ -14,8 +14,7 @@ def get_world_climate(proj, months, param='prec'):
     assert param in ['tavg', 'prec']
     combinations = [(m, param) for m in months]
 
-    l = [ee.Image('WORLDCLIM/V1/MONTHLY/{}'.format(m)).
-         select(param).resample('bilinear').reproject(crs=proj['crs'], scale=30) for m, p in combinations]
+    l = [ee.Image('WORLDCLIM/V1/MONTHLY/{}'.format(m)).select(param) for m, p in combinations]
     i = ee.ImageCollection(l)
     if param == 'prec':
         i = i.sum()

@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 from collections import OrderedDict
 
 import numpy as np
@@ -46,6 +47,7 @@ def join_csv_shapefile(in_shp, csv, out_shape, min_irr_years=20):
 
 def prep_extracts(in_dir, out_dir, clamp_et=False):
     l = [os.path.join(in_dir, x) for x in os.listdir(in_dir) if x.endswith('.csv')]
+    sdf, first = None, True
     for c in l:
         print(os.path.basename(c))
         df = pd.read_csv(c)
@@ -68,6 +70,13 @@ def prep_extracts(in_dir, out_dir, clamp_et=False):
 
         print(df.shape)
         df.to_csv(os.path.join(out_dir, os.path.basename(c)), index=False)
+        if first:
+            sdf = deepcopy(df)
+            first = False
+        else:
+            sdf = pd.concat([sdf, df], axis=0, ignore_index=True)
+    all_file = os.path.join(out_dir, '{}_all_{}.csv'.format(os.path.basename(out_dir), yr))
+    sdf.to_csv(all_file, index=False)
 
 
 def initial_cdl_filter(cdl_dir, in_shape, out_shape):

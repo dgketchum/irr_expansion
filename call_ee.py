@@ -76,7 +76,6 @@ def get_geomteries():
 
 
 def export_classification(extract, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
-    proj = ee.Projection('EPSG:5071').getInfo()
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
@@ -86,61 +85,53 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
 
         targets, input_props = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)], PROPS
         roi = ee.FeatureCollection(region)
+        input_bands = stack_bands(yr, roi).resample('bilinear')
+        input_bands = input_bands.mask(irr_mask)
 
-        for state in BASIN_STATES:
-            if state != 'ID':
-                continue
+        for target, month in zip(targets, range(4, 11)):
 
-            extract_path = extract.format(state, yr)
+            cols = input_props + [target]
+            fc = ee.FeatureCollection(extract).select(cols)
 
-            input_bands = stack_bands(yr, roi)
-            state_bound = ee.FeatureCollection(os.path.join(BOUNDARIES, state))
-            input_bands = input_bands.clip(state_bound).resample('bilinear').reproject(crs=proj['crs'], scale=30)
+            classifier = ee.Classifier.smileRandomForest(
+                numberOfTrees=150,
+                bagFraction=bag_fraction).setOutputMode('REGRESSION')
+
+            trained_model = classifier.train(fc, target, input_props)
+
+            image_stack = input_bands.select(input_props + [target])
+
+            desc = 'eff_ppt_{}_{}'.format(yr, month)
+
+            classified_img = image_stack.unmask().classify(trained_model).int().set({
+                'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
+                'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
+                'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
+                'date_ingested': str(date.today()),
+                'image_name': desc,
+                'training_data': extract,
+                'bag_fraction': bag_fraction,
+                'target': target})
 
             if irr_mask:
                 irr = irr_coll.filterDate('{}-01-01'.format(yr),
                                           '{}-12-31'.format(yr)).select('classification').mosaic()
                 irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
-                input_bands = input_bands.mask(irr_mask)
+                classified_img = classified_img.mask(irr_mask)
 
-            for target, month in zip(targets, range(4, 11)):
+            classified_img = classified_img.rename('eff_ppt')
 
-                cols = input_props + [target]
-                fc = ee.FeatureCollection(extract_path).select(cols)
+            asset_id = os.path.join(asset_root, desc)
+            task = ee.batch.Export.image.toAsset(
+                image=classified_img,
+                description=desc,
+                assetId=asset_id,
+                scale=30,
+                pyramidingPolicy={'.default': 'mean'},
+                maxPixels=1e13)
 
-                classifier = ee.Classifier.smileRandomForest(
-                    numberOfTrees=150,
-                    bagFraction=bag_fraction).setOutputMode('REGRESSION')
-
-                trained_model = classifier.train(fc, target, input_props)
-
-                image_stack = input_bands.select(input_props + [target])
-
-                desc = 'eff_ppt_{}_{}_{}'.format(state, yr, month)
-
-                classified_img = image_stack.classify(trained_model).int().set({
-                    'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
-                    'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
-                    'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
-                    'date_ingested': str(date.today()),
-                    'image_name': desc,
-                    'training_data': extract_path,
-                    'bag_fraction': bag_fraction,
-                    'target': target})
-
-                classified_img = classified_img.rename('eff_ppt')
-
-                asset_id = os.path.join(asset_root, desc)
-                task = ee.batch.Export.image.toAsset(
-                    image=classified_img,
-                    description=desc,
-                    assetId=asset_id,
-                    scale=30,
-                    pyramidingPolicy={'.default': 'mean'},
-                    maxPixels=1e13)
-
-                task.start()
-                print(asset_id, target)
+            task.start()
+            print(asset_id, target)
 
 
 def request_band_extract(file_prefix, points_layer, region, years):
@@ -495,15 +486,15 @@ if __name__ == '__main__':
     years_ = [x for x in range(1987, 2022)]
     years_.reverse()
     years_ = [2020]
-    # request_band_extract('bands_29DEC2022', points_, clip, years_)
+    request_band_extract('bands_29DEC2022', points_, clip, years_)
 
     pts = 'users/dgketchum/expansion/pts_29DEC2022'
     # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
 
-    extract_ = 'users/dgketchum/expansion/tables_29DEC2022/bands_29DEC2022_{}_{}'
-    # ic = 'users/dgketchum/expansion/eff_ppt_snake'
+    extract_ = 'users/dgketchum/expansion/tables_29DEC2022/bands_29DEC2022_all_2020'
     ic = 'users/dgketchum/expansion/eff_ppt'
+    # ic = 'users/dgketchum/expansion/eff_ppt_studywide'
     # clip = 'users/dgketchum/expansion/snake_plain'
-    export_classification(extract_, ic, clip, years_, irr_mask=True)
+    # export_classification(extract_, ic, clip, years_, irr_mask=False)
 
 # ========================= EOF ====================================================================
