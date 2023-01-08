@@ -75,23 +75,25 @@ def get_geomteries():
     return uinta, test_point
 
 
-def export_classification(extract, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
+def export_classification(extracts, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
+
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
     irr_min_yr_mask = remap.sum().gte(min_irr_years)
+    proj = ee.Projection('EPSG:5071').getInfo()
 
     for yr in years:
 
         targets, input_props = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)], PROPS
         roi = ee.FeatureCollection(region)
-        input_bands = stack_bands(yr, roi).resample('bilinear')
-        input_bands = input_bands.mask(irr_mask)
+        input_bands = stack_bands(yr, roi).resample('bilinear').reproject(crs=proj['crs'], scale=30)
 
         for target, month in zip(targets, range(4, 11)):
 
             cols = input_props + [target]
-            fc = ee.FeatureCollection(extract).select(cols)
+            table_ = os.path.join(extracts, 'bands_29DEC2022_{}'.format(yr))
+            fc = ee.FeatureCollection(table_).select(cols)
 
             classifier = ee.Classifier.smileRandomForest(
                 numberOfTrees=150,
@@ -99,17 +101,17 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
 
             trained_model = classifier.train(fc, target, input_props)
 
-            image_stack = input_bands.select(input_props + [target])
+            image_stack = input_bands.select(input_props)
 
             desc = 'eff_ppt_{}_{}'.format(yr, month)
 
-            classified_img = image_stack.unmask().classify(trained_model).int().set({
+            classified_img = image_stack.unmask().classify(trained_model).float().set({
                 'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
                 'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
                 'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
                 'date_ingested': str(date.today()),
                 'image_name': desc,
-                'training_data': extract,
+                'training_data': extracts,
                 'bag_fraction': bag_fraction,
                 'target': target})
 
@@ -120,6 +122,7 @@ def export_classification(extract, asset_root, region, years, bag_fraction=0.5, 
                 classified_img = classified_img.mask(irr_mask)
 
             classified_img = classified_img.rename('eff_ppt')
+            classified_img = classified_img.clip(roi.geometry())
 
             asset_id = os.path.join(asset_root, desc)
             task = ee.batch.Export.image.toAsset(
@@ -229,10 +232,10 @@ def stack_bands(yr, roi):
 
         input_bands = input_bands.addBands([temp, wd_estimate, ppt, etr, anom_prec, anom_temp])
 
-    awc = ee.Image('projects/openet/soil/ssurgo_AWC_WTA_0to152cm_composite').rename('awc')
-    clay = ee.Image('projects/openet/soil/ssurgo_Clay_WTA_0to152cm_composite').rename('clay')
-    ksat = ee.Image('projects/openet/soil/ssurgo_Ksat_WTA_0to152cm_composite').rename('ksat')
-    sand = ee.Image('projects/openet/soil/ssurgo_Sand_WTA_0to152cm_composite').rename('sand')
+    awc = ee.Image('users/dgketchum/soils/ssurgo_AWC_WTA_0to152cm_composite').rename('awc')
+    clay = ee.Image('users/dgketchum/soils/ssurgo_Clay_WTA_0to152cm_composite').rename('clay')
+    ksat = ee.Image('users/dgketchum/soils/ssurgo_Ksat_WTA_0to152cm_composite').rename('ksat')
+    sand = ee.Image('users/dgketchum/soils/ssurgo_Sand_WTA_0to152cm_composite').rename('sand')
 
     et = irr_et_data(yr)
     input_bands = input_bands.addBands([et, awc, clay, ksat, sand])
@@ -482,19 +485,16 @@ if __name__ == '__main__':
 
     points_ = 'users/dgketchum/expansion/points/pts_29DEC2022'
     bucket = 'wudr'
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
-    years_ = [x for x in range(1987, 2022)]
-    years_.reverse()
-    years_ = [2020]
-    request_band_extract('bands_29DEC2022', points_, clip, years_)
+    # request_band_extract('bands_29DEC2022', points_, clip, years_)
 
     pts = 'users/dgketchum/expansion/pts_29DEC2022'
     # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
 
-    extract_ = 'users/dgketchum/expansion/tables_29DEC2022/bands_29DEC2022_all_2020'
-    ic = 'users/dgketchum/expansion/eff_ppt'
-    # ic = 'users/dgketchum/expansion/eff_ppt_studywide'
-    # clip = 'users/dgketchum/expansion/snake_plain'
-    # export_classification(extract_, ic, clip, years_, irr_mask=False)
+    extract_loc = 'users/dgketchum/expansion/tables_29DEC2022/'
+    ic = 'users/dpendergraph/expansion/eff_ppt'
+    years_ = [x for x in range(1987, 2005)]
+    years_.reverse()
+    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    export_classification(extract_loc, ic, clip, years_, irr_mask=True)
 
 # ========================= EOF ====================================================================
