@@ -63,7 +63,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
     corb_clip = ee.FeatureCollection(CORB_CLIP)
 
     eff_ppt_coll = ee.ImageCollection('users/dgketchum/expansion/naturalized_et')
-    eff_ppt_coll = eff_ppt_coll.map(lambda x: x.rename('et'))
+    eff_ppt_coll = eff_ppt_coll.map(lambda x: x.rename('eff_ppt'))
 
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
@@ -72,8 +72,6 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
 
     for yr in years:
         for month in range(1, 13):
-            if month not in [4, 5, 6, 8, 7]:
-                continue
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -99,16 +97,19 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
             et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
             et = et_sum.mask(irr_mask)
 
-            eff_ppt = eff_ppt_coll.filterDate(s, e).select('et').mosaic().multiply(0.00001)
+            eff_ppt = eff_ppt_coll.filterDate(s, e).select('eff_ppt').mosaic().multiply(0.00001)
             eff_ppt = eff_ppt.mask(irr_mask).rename('eff_ppt')
 
             ppt, etr = extract_gridmet_monthly(yr, month)
+            ietr = extract_corrected_etr(yr, month)
+            ietr = ietr.mask(irr_mask)
 
             irr_mask = irr_mask.reproject(crs='EPSG:5070', scale=30)
             et = et.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
             eff_ppt = eff_ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
             ppt = ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
             etr = etr.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
+            ietr = ietr.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
 
             cc = et.subtract(eff_ppt)
 
@@ -119,10 +120,12 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
             cc = cc.multiply(area).rename('cc')
             ppt = ppt.multiply(area).rename('ppt')
             etr = etr.multiply(area).rename('etr')
+            ietr = ietr.multiply(area).rename('ietr')
 
             if yr > 1986 and month in np.arange(4, 11):
-                bands = irr.addBands([et, cc, ppt, etr, eff_ppt])
-                select_ = ['STAID', 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt']
+                bands = irr.addBands([et, cc, ppt, etr, eff_ppt, ietr])
+                select_ = ['STAID', 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
+
             else:
                 bands = ppt.addBands([etr])
                 select_ = ['STAID', 'ppt', 'etr']
@@ -148,6 +151,14 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
                 selectors=select_)
             task.start()
             print(out_desc)
+
+
+def extract_corrected_etr(year, month):
+    m_str = str(month).rjust(2, '0')
+    end_day = monthrange(year, month)[1]
+    ic = ee.ImageCollection('projects/openet/reference_et/gridmet/monthly')
+    band = ic.filterDate('{}-{}-01'.format(year, m_str), '{}-{}-{}'.format(year, m_str, end_day)).select('etr').first()
+    return band.multiply(0.001)
 
 
 def extract_gridmet_monthly(year, month):
@@ -178,5 +189,5 @@ if __name__ == '__main__':
 
     # extract_point_data(points, bucket, [2020], 'uinta', debug=
 
-    export_gridded_data(basins, bucket, list(range(1982, 1991)), 'et_interp', min_years=5, debug=False)
+    export_gridded_data(basins, bucket, list(range(1982, 2022)), 'ietr_8JAN2023', min_years=5, debug=False)
 # ========================= EOF ================================================================================
