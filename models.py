@@ -73,9 +73,11 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
             c.drop(columns=drop, inplace=True)
         elif 'Unnamed: 0' in c.columns:
             c.drop(columns=['Unnamed: 0', 'season'], inplace=True)
-        else:
+        elif 'MGRS_TILE' in c.columns:
             drop = ['.geo', 'system:index', 'MGRS_TILE', 'id', 'study_uncu', 'season']
             c.drop(columns=drop, inplace=True)
+        else:
+            c.drop(columns=['season'], inplace=True)
 
     val_df = None
     print(c.shape)
@@ -170,59 +172,6 @@ def plot_regressions(df, outfig):
     plt.savefig(outfig)
 
 
-def find_rf_variable_importance(csv, target, out_csv=None, drop=None, n_features=25):
-    first = True
-    master = {}
-    df = read_csv(csv, engine='python')
-    try:
-        df = df[df['irr_2020'] == 2]
-    except KeyError:
-        pass
-    df_copy = deepcopy(df)
-    labels = list(df[target].values)
-    try:
-        df.drop(columns=drop + [target], inplace=True)
-    except KeyError:
-        df.drop(columns=[target], inplace=True)
-    df.dropna(axis=1, inplace=True)
-    data = df.values
-    names = df.columns
-
-    for x in range(10):
-        d, _, l, _ = train_test_split(data, labels, train_size=0.67)
-        print('model iteration {}'.format(x + 1))
-        rf = RandomForestRegressor(n_estimators=150,
-                                   n_jobs=-1,
-                                   bootstrap=True)
-
-        rf.fit(d, l)
-        _list = [(f, v) for f, v in zip(names, rf.feature_importances_)]
-        imp = sorted(_list, key=lambda x: x[1], reverse=True)
-        print([f[0] for f in imp[:10]])
-
-        if first:
-            for (k, v) in imp:
-                master[k] = v
-            first = False
-        else:
-            for (k, v) in imp:
-                master[k] += v
-
-    master = list(master.items())
-    master = sorted(master, key=lambda x: x[1], reverse=True)
-    print('\ntop {} features:'.format(n_features))
-    carry_features = [x[0] for x in master[:n_features]]
-    print(carry_features)
-    df[target] = df_copy.loc[df.index, target]
-    try:
-        df.index = df['id']
-    except KeyError:
-        pass
-    if out_csv:
-        df.to_csv(out_csv, index=False)
-    return df
-
-
 def write_histograms(csv, fig_dir):
     if not isinstance(csv, DataFrame):
         print('\n', csv)
@@ -277,9 +226,9 @@ if __name__ == '__main__':
     # study_wide_accuracy(r, 'bands_29DEC2022', 2020)
     prepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
     study_area = os.path.join(prepped, 'bands_29DEC2022_all_2020.csv')
-    # random_forest(study_area)
+    random_forest(study_area, show_importance=True)
 
     original = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_29NOV2022')
     original_domain = os.path.join(original, 'domain_2020.csv')
-    random_forest(original_domain)
+    # random_forest(original_domain)
 # ========================= EOF ====================================================================

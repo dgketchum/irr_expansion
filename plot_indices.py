@@ -62,7 +62,7 @@ def plot_indices(meta, gridded_data, out_figs, overwrite=False):
                                  periodicity=compute.Periodicity.monthly)
 
         df['SCUI'] = indices.spi(df['cc'].values,
-                                 scale=3,
+                                 scale=7,
                                  distribution=indices.Distribution.gamma,
                                  data_start_year=1987,
                                  calibration_year_initial=1987,
@@ -84,9 +84,9 @@ def plot_indices(meta, gridded_data, out_figs, overwrite=False):
         ax2.scatter(oct_df['SPEI_12'], oct_df['SSFI'], s=15, marker='.', c='b')
 
         ax3 = plt.subplot(2, 3, 3)
-        ax3.set(xlabel='SSFI - 12 Month', ylabel='SCUI')
+        ax3.set(xlabel='SPI - 12 Month', ylabel='SCUI')
         ax3.title.set_text('Standardized Consumptive Use Index')
-        ax3.scatter(oct_df['SSFI'], oct_df['SCUI'], s=15, marker='.', c='b')
+        ax3.scatter(oct_df['SPI_12'], oct_df['SCUI'], s=15, marker='.', c='b')
 
         lim = [-3, 3]
         [ax.set_ylim(lim) for ax in [ax1, ax2, ax3]]
@@ -100,7 +100,6 @@ def plot_indices(meta, gridded_data, out_figs, overwrite=False):
         plt.suptitle(station['STANAME'])
         plt.tight_layout()
         plt.savefig(fig_)
-        plt.show()
         print(os.path.basename(fig_))
 
 

@@ -128,7 +128,7 @@ if __name__ == '__main__':
 
     asset_root = 'users/dgketchum/expansion/tables_29DEC2022'
     bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    dest = os.path.join(_bucket, 'expansion_bands')
+    dest = os.path.join(_bucket, 'bands_29DEC2022')
     push_bands_to_asset(bands_out, asset_root, 'bands_29DEC2022', dest)
 
 # ========================= EOF ====================================================================
