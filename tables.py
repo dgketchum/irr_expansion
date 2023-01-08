@@ -46,37 +46,41 @@ def join_csv_shapefile(in_shp, csv, out_shape, min_irr_years=20):
 
 
 def prep_extracts(in_dir, out_dir, clamp_et=False):
-    l = [os.path.join(in_dir, x) for x in os.listdir(in_dir) if x.endswith('.csv')]
-    sdf, first = None, True
-    for c in l:
-        print(os.path.basename(c))
-        df = pd.read_csv(c)
-        print(df.shape)
-        yr = int(os.path.basename(c).split('.')[0][-4:])
-        et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
-        df['season'] = df[et_cols].sum(axis=1) * 0.00001
+    ldata = []
+    for yr in range(1987, 2022):
+        l = [os.path.join(in_dir, x) for x in os.listdir(in_dir) if x.endswith('{}.csv'.format(yr))]
+        sdf, first = None, True
+        assert len(l) == 10
+        for c in l:
+            df = pd.read_csv(c)
+            et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
+            df['season'] = df[et_cols].sum(axis=1) * 0.00001
 
-        if clamp_et:
-            df = df[df['season'] < df['ppt_wy_et'] * 0.001]
-            DROP.append('season')
+            if clamp_et:
+                df = df[df['season'] < df['ppt_wy_et'] * 0.001]
+                DROP.append('season')
 
-        df.dropna(inplace=True)
-        try:
-            d = ['STUSPS', '.geo', 'system:index', 'id', 'uncult', 'cdl', 'nlcd']
-            df.drop(columns=d, inplace=True)
-        except KeyError:
-            d = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
-            df.drop(columns=d, inplace=True)
+            df.dropna(inplace=True)
+            try:
+                d = ['STUSPS', '.geo', 'system:index', 'id', 'uncult', 'cdl', 'nlcd']
+                df.drop(columns=d, inplace=True)
+            except KeyError:
+                d = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
+                df.drop(columns=d, inplace=True)
 
-        print(df.shape)
-        df.to_csv(os.path.join(out_dir, os.path.basename(c)), index=False)
-        if first:
-            sdf = deepcopy(df)
-            first = False
-        else:
-            sdf = pd.concat([sdf, df], axis=0, ignore_index=True)
-    all_file = os.path.join(out_dir, '{}_all_{}.csv'.format(os.path.basename(out_dir), yr))
-    sdf.to_csv(all_file, index=False)
+            if first:
+                sdf = deepcopy(df)
+                first = False
+            else:
+                sdf = pd.concat([sdf, df], axis=0, ignore_index=True)
+
+        fname = '{}_{}.csv'.format(os.path.basename(out_dir), yr)
+        all_file = os.path.join(out_dir, fname)
+        print(sdf.shape, fname)
+        sdf.to_csv(all_file, index=False)
+        ldata.append(sdf.shape[0])
+
+    print('av len data: {:.3f}'.format(np.mean(ldata)))
 
 
 def initial_cdl_filter(cdl_dir, in_shape, out_shape):
