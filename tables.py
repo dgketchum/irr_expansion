@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from collections import OrderedDict
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,8 @@ import geopandas as gpd
 import fiona
 from shapely.geometry import Point, shape, mapping
 from rasterstats import zonal_stats
+
+from gage_data import hydrograph
 
 DROP = ['left', 'right', 'top', 'bottom']
 UNCULT_CDL = [62,
@@ -126,19 +129,123 @@ def centroid_strip_attr(in_shp, out_shp):
     print(out_shp)
 
 
-if __name__ == '__main__':
-    root = os.path.join('/media/research', 'IrrigationGIS')
-    if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
+def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end_year=2021, glob='glob',
+                            join_key='STAID'):
+    missing, missing_ct, processed_ct = [], 0, 0
 
-    pts = os.path.join(root, 'expansion', 'shapefiles', 'points_29DEC2022')
+    l = [os.path.join(gridded_dir, x) for x in os.listdir(gridded_dir) if glob in x]
+    l.reverse()
+
+    first = True
+    for csv in l:
+        splt = os.path.basename(csv).split('_')
+        y, m = int(splt[-2]), int(splt[-1].split('.')[0])
+
+        try:
+            if first:
+                df = pd.read_csv(csv, index_col=join_key)
+                df.columns = ['{}_{}_{}'.format(col, y, m) for col in list(df.columns)]
+                first = False
+            else:
+                c = pd.read_csv(csv, index_col=join_key)
+                if y < start_year:
+                    c['irr'] = [np.nan for _ in range(c.shape[0])]
+                    c['et'] = [np.nan for _ in range(c.shape[0])]
+                    c['ept'] = [np.nan for _ in range(c.shape[0])]
+                    c['ietr'] = [np.nan for _ in range(c.shape[0])]
+                    c['cc'] = [np.nan for _ in range(c.shape[0])]
+                cols = list(c.columns)
+                c.columns = ['{}_{}_{}'.format(col, y, m) for col in cols]
+                df = pd.concat([df, c], axis=1)
+
+        except pd.errors.EmptyDataError:
+            print('{} is empty'.format(csv))
+            pass
+
+    df = df.copy()
+    df['STAID_STR'] = [str(x).rjust(8, '0') for x in list(df.index.values)]
+
+    dfd = df.to_dict(orient='records')
+    s, e = '{}-01-01'.format(start_year), '{}-12-31'.format(end_year)
+    idx = pd.DatetimeIndex(pd.date_range(s, e, freq='M'))
+
+    months = [(idx.year[x], idx.month[x]) for x in range(idx.shape[0])]
+
+    for d in dfd:
+        try:
+            sta = d['STAID_STR']
+
+            irr, cc, et, ietr, ept = [], [], [], [], []
+            for y, m in months:
+                try:
+                    cc_, et_ = d['cc_{}_{}'.format(y, m)], d['et_{}_{}'.format(y, m)]
+                    ietr_, ept_ = d['ietr_{}_{}'.format(y, m)], d['eff_ppt_{}_{}'.format(y, m)]
+                    irr_ = d['irr_{}_{}'.format(y, m)]
+                    cc.append(cc_)
+                    et.append(et_)
+                    ietr.append(ietr_)
+                    ept.append(ept_)
+                    irr.append(irr_)
+                except KeyError:
+                    cc.append(np.nan)
+                    et.append(np.nan)
+                    ietr.append(np.nan)
+                    ept.append(np.nan)
+                    irr.append(np.nan)
+
+            irr = irr, 'irr'
+            cc = cc, 'cc'
+            et = et, 'et'
+            ept = ept, 'ept'
+            ietr = ietr, 'ietr'
+
+            if not np.any(irr[0]):
+                print(sta, 'no irrigation')
+                continue
+
+            ppt = [d['ppt_{}_{}'.format(y, m)] for y, m in months], 'ppt'
+            etr = [d['etr_{}_{}'.format(y, m)] for y, m in months], 'etr'
+
+            recs = pd.DataFrame(dict([(x[1], x[0]) for x in [irr, et, cc, ppt, etr, ietr, ept]]), index=idx)
+
+            q_file = os.path.join(flow_dir, '{}.csv'.format(sta))
+            qdf = hydrograph(q_file)
+            h = pd.concat([qdf, recs], axis=1)
+
+            file_name = os.path.join(out_dir, '{}.csv'.format(sta))
+            h.to_csv(file_name)
+            processed_ct += 1
+
+            print(file_name)
+
+        except FileNotFoundError:
+            missing_ct += 1
+            print(sta, 'not found')
+            missing.append(sta)
+
+    print(processed_ct, 'processed')
+    print(missing_ct, 'missing')
+    pprint(missing)
+
+
+if __name__ == '__main__':
+    root = '/media/research/IrrigationGIS/expansion'
+    if not os.path.exists(root):
+        root = '/home/dgketchum/data/IrrigationGIS/expansion'
+
+    pts = os.path.join(root, 'shapefiles', 'points_29DEC2022')
     ishp = os.path.join(pts, 'random_points.shp')
     c = os.path.join(pts, 'sample_pts_29DEC2022.csv')
     oshp = os.path.join(pts, 'sample_pts_29DEC2022.shp')
     # join_csv_shapefile(ishp, c, oshp)
 
-    extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_29DEC2022')
-    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    prep_extracts(extracts, bands_out, clamp_et=True)
+    extracts = os.path.join(root, 'tables', 'band_extracts', 'bands_29DEC2022')
+    bands_out = os.path.join(root, 'tables', 'prepped_bands', 'bands_29DEC2022')
+    # prep_extracts(extracts, bands_out, clamp_et=True)
+
+    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'extracts_ietr_nater_8JAN2022')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_nater_8JAN2022')
+    hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
+    merge_gridded_flow_data(basin_extracts, hydrographs_, merged, glob='ietr_8JAN2023')
 
 # ========================= EOF ====================================================================
