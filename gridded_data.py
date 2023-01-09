@@ -5,6 +5,7 @@ from calendar import monthrange
 import numpy as np
 import ee
 
+
 sys.path.insert(0, os.path.abspath('..'))
 sys.setrecursionlimit(5000)
 
@@ -186,8 +187,10 @@ if __name__ == '__main__':
     points = 'users/dgketchum/points/grid_5km_uinta'
     bucket = 'wudr'
     basins = 'users/dgketchum/gages/gage_basins'
+    huc = 'users/dgketchum/boundaries/huc8_study'
 
     # extract_point_data(points, bucket, [2020], 'uinta', debug=
 
-    export_gridded_data(basins, bucket, list(range(1982, 2022)), 'ietr_8JAN2023', min_years=5, debug=False)
+    export_gridded_data(huc, bucket, list(range(1982, 2022)), 'ietr_huc8_8JAN2023', min_years=5, debug=False)
+
 # ========================= EOF ================================================================================
