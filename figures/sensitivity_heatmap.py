@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
@@ -34,37 +35,47 @@ plt.style.use('seaborn-darkgrid')
 sns.set_style("dark", {'axes.linewidth': 0.5})
 
 
-def heatmap(data, fig_d):
+def heatmap(data_dir, fig_d, param='r2'):
     met_periods = [1, 6, 12, 18, 24, 30, 36]
-    use_periods = list(range(1, 8))
 
-    with open(data, 'r') as f_obj:
-        data = json.load(f_obj)
+    for month in range(5, 11):
+        use_periods = list(range(1, month - 2))
 
-    combos = [('SPI', 'SCUI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPEI', 'SIMI')]
+        data = os.path.join(data_dir, 'irrigated_indices_{}.json'.format(month))
 
-    keys = data[list(data.keys())[0]].keys()
-    rvals = {k: [] for k in keys}
-    for sid, v in data.items():
-        for key, val in v.items():
-            if val['p'] < 0.05:
-                rvals[key].append(val['r2'])
+        with open(data, 'r') as f_obj:
+            data = json.load(f_obj)
 
-    for met, use in combos:
-        grid = np.zeros((len(use_periods), len(met_periods)))
-        for i, u in enumerate(use_periods):
-            for j, m in enumerate(met_periods):
-                grid[i, j] = np.mean(rvals['{}_{}_{}_{}'.format(met, m, use, u)])
-        grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid)
-        sns.heatmap(grid, annot=True, cmap='coolwarm')
-        fig_file = os.path.join(fig_d, '{}_{}_heatmap.png'.format(met.lower(), use.lower()))
-        plt.xlabel('{} - Months'.format(use))
-        plt.ylabel('{} - Months'.format(met))
-        plt.title('Mean Study Area Basin Correlations\nSensitivity in October')
-        plt.tight_layout()
-        plt.savefig(fig_file)
-        plt.close()
-        print(fig_file)
+        combos = [('SPI', 'SCUI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPEI', 'SIMI')]
+
+        keys = data[list(data.keys())[0]].keys()
+        param_vals = {k: [] for k in keys}
+
+        for sid, v in data.items():
+            for key, val in v.items():
+                if val['p'] < 0.05:
+                    param_vals[key].append(val[param])
+
+        for met, use in combos:
+            grid = np.zeros((len(use_periods), len(met_periods)))
+            for i, u in enumerate(use_periods):
+                for j, m in enumerate(met_periods):
+                    grid[i, j] = np.mean(param_vals['{}_{}_{}_{}'.format(met, m, use, u)])
+
+            grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid)
+            ax = sns.heatmap(grid, annot=True, cmap='magma')
+            y, x = np.unravel_index(np.argmax(np.abs(grid), axis=None), grid.shape)
+            ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
+            plt.xlabel('{} - Months'.format(use))
+            plt.ylabel('{} - Months'.format(met))
+            mstr = datetime(1991, month, 1).strftime('%B')
+            plt.title('Mean Study Area Basin Correlations\nSensitivity in {}'.format(mstr))
+            plt.tight_layout()
+
+            fig_file = os.path.join(fig_d, param, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
+            plt.savefig(fig_file)
+            plt.close()
+            print('{:.3f} {}'.format(grid.values[y, x], os.path.basename(fig_file)))
 
 
 if __name__ == '__main__':
@@ -72,7 +83,7 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
     figs = os.path.join(root, 'figures', 'heatmaps')
-    js_ = os.path.join(root, 'analysis', 'basin_sensitivities', 'irrigated_indices_10.json')
-    heatmap(js_, figs)
+    js_ = os.path.join(root, 'analysis', 'basin_sensitivities')
+    heatmap(js_, figs, param='r2')
 
 # ========================= EOF ====================================================================
