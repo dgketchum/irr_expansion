@@ -40,12 +40,15 @@ def get_geomteries():
     return bozeman, navajo, test_point, western_us
 
 
-def export_gridded_data(tables, bucket, years, description, features=None, min_years=5, debug=False):
+def export_gridded_data(tables, bucket, years, description, features=None,
+                        min_years=5, debug=False, join_col='STAID'):
     """
     Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
     Use this to get e.g. irrigated area within a county, HUC, or state. This can mask based on Crop Data Layer,
     and can mask data where the sum of irrigated years is less than min_years. This will output a .csv to
     GCS wudr bucket.
+    :param debug:
+    :param join_col:
     :param features:
     :param bucket:
     :param tables: vector data over which to take raster statistics
@@ -72,7 +75,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
     irr_min_yr_mask = remap.sum().gte(min_years)
 
     for yr in years:
-        for month in range(1, 13):
+        for month in [8, 10]:
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -125,11 +128,11 @@ def export_gridded_data(tables, bucket, years, description, features=None, min_y
 
             if yr > 1986 and month in np.arange(4, 11):
                 bands = irr.addBands([et, cc, ppt, etr, eff_ppt, ietr])
-                select_ = ['STAID', 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
+                select_ = [join_col, 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 
             else:
                 bands = ppt.addBands([etr])
-                select_ = ['STAID', 'ppt', 'etr']
+                select_ = [join_col, 'ppt', 'etr']
 
             data = bands.reduceRegions(collection=fc,
                                        reducer=ee.Reducer.sum(),
@@ -191,6 +194,7 @@ if __name__ == '__main__':
 
     # extract_point_data(points, bucket, [2020], 'uinta', debug=
 
-    export_gridded_data(huc, bucket, list(range(1982, 2022)), 'ietr_huc8_8JAN2023', min_years=5, debug=False)
+    export_gridded_data(huc, bucket, [1993], 'ietr_huc8_8JAN2023',
+                        min_years=5, debug=False, join_col='huc8')
 
 # ========================= EOF ================================================================================

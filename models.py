@@ -6,12 +6,17 @@ from datetime import date
 import numpy as np
 import pandas as pd
 from pandas import read_csv, DataFrame
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
 from scipy.stats import linregress
-from sklearn.metrics import mean_squared_error
 from geopandas import GeoDataFrame
 from shapely.geometry import Point
+
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
@@ -48,8 +53,48 @@ def study_wide_accuracy(dir_, glob, year, seed=1234):
     print('rmse', season_rmse)
 
 
-def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None,
-                  show_importance=False, clamp_et=False, seed=None):
+class RandomForest:
+
+    def __init__(self):
+        self.rf = None
+
+    def fit(self, x, y):
+        self.rf = RandomForestRegressor(n_estimators=150,
+                                        n_jobs=-1,
+                                        bootstrap=True,
+                                        oob_score=True,
+                                        min_samples_leaf=5)
+        self.rf.fit(x, y)
+
+    def predict(self, x):
+        return self.rf.predict(x)
+
+
+class DNN:
+    def __init__(self, x):
+        self.normalizer = tf.keras.layers.Normalization(axis=-1)
+        self.normalizer.adapt(x)
+        self.dnn_model = self.build_and_compile_model()
+
+    def build_and_compile_model(self):
+        model = keras.Sequential([
+            self.normalizer,
+            layers.Dense(256, activation='relu'),
+            layers.Dense(256, activation='relu'),
+            layers.Dense(1)
+        ])
+        model.compile(loss='mean_absolute_error',
+                      optimizer=tf.keras.optimizers.Adam(0.001))
+        return model
+
+    def fit(self, x, y):
+        self.dnn_model.fit(x, y, verbose=0, epochs=200)
+
+    def predict(self, x_test):
+        return self.dnn_model.predict(x_test).flatten()
+
+
+def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=None, clamp_et=False):
     if not isinstance(csv, DataFrame):
         print('\n', csv)
         c = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
@@ -58,33 +103,20 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
 
     et_cols = ['et_{}_{}'.format(year, mm) for mm in range(4, 11)]
     for etc in et_cols:
-        c[etc] = c[etc] * 0.00001
+        c[etc] = c[etc].values.astype(float) * 0.00001
     c['season'] = c[et_cols].sum(axis=1)
     print(c.shape)
     if clamp_et:
         c = c[c['season'] < c['ppt_wy_et'] * 0.001]
 
-    try:
-        drop = ['uncult', 'season', 'STUSPS', '.geo', 'system:index', 'id', 'cdl', 'nlcd']
-        c.drop(columns=drop, inplace=True)
-    except KeyError:
-        drop = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
-        if drop[2] in c.columns:
-            c.drop(columns=drop, inplace=True)
-        elif 'Unnamed: 0' in c.columns:
-            c.drop(columns=['Unnamed: 0', 'season'], inplace=True)
-        elif 'MGRS_TILE' in c.columns:
-            drop = ['.geo', 'system:index', 'MGRS_TILE', 'id', 'study_uncu', 'season']
-            c.drop(columns=drop, inplace=True)
-        else:
-            c.drop(columns=['season'], inplace=True)
+    c.drop(columns=['season'], inplace=True)
 
+    split = int(c.shape[0] * 0.7)
     val_df = None
-    print(c.shape)
 
     targets, features, first = [], None, True
-    for m in range(4, 11):
-        df = deepcopy(c)
+    for m in range(4, 5):
+        df = deepcopy(c.loc[:split, :])
         mstr = str(m)
         target = 'et_{}_{}'.format(year, m)
 
@@ -93,48 +125,54 @@ def random_forest(csv, n_estimators=150, out_shape=None, year=2020, out_fig=None
         df.drop(columns=et_cols, inplace=True)
         x = df.values
         targets.append(target)
+        val = deepcopy(c.loc[split:, :])
 
         if first:
             features = list(df.columns)
-            geo = df.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
-            val_df = deepcopy(c)
+            geo = val.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
+            val_df = deepcopy(c.loc[split:, :])
             first = False
 
-        rf = RandomForestRegressor(n_estimators=n_estimators,
-                                   n_jobs=-1,
-                                   bootstrap=True,
-                                   oob_score=True,
-                                   random_state=seed,
-                                   min_samples_leaf=5)
+        val.dropna(axis=0, inplace=True)
+        y_test = val[target].values
+        val.drop(columns=et_cols, inplace=True)
+        x_test = val.values
 
-        rf.fit(x, y)
+        if model == 'random_forest':
+            rf = RandomForest()
+            rf.fit(x, y)
+            y_pred = rf.predict(x_test)
+        elif model == 'dnn':
+            nn = DNN(x)
+            nn.fit(x, y)
+            y_pred = nn.predict(x_test)
 
-        if show_importance:
-            _list = [(f, v) for f, v in zip(list(df.columns), rf.feature_importances_)]
-            imp = sorted(_list, key=lambda x: x[1], reverse=True)
-            print([f[0] for f in imp[:10]])
-
-        val_df['label_{}'.format(mstr)] = y
-        val_df['pred_{}'.format(mstr)] = rf.oob_prediction_
-        val_df['diff_{}'.format(mstr)] = rf.oob_prediction_ - y
-        rmse = mean_squared_error(y, rf.oob_prediction_, squared=False)
+        rmse = mean_squared_error(y_test, y_pred, squared=False)
+        val_df['label_{}'.format(mstr)] = y_test
+        val_df['label_{}'.format(mstr)] = val_df['label_{}'.format(mstr)].apply(lambda x: x if x > 0 else np.nan)
+        val_df['pred_{}'.format(mstr)] = y_pred
+        val_df['pred_{}'.format(mstr)] = np.where(y_test == 0, np.nan, y_pred)
+        d = y_pred - y_test
+        d[np.abs(d) > 1] = np.nan
+        val_df['diff_{}'.format(mstr)] = np.where(y_test == 0, np.nan, d)
         print('\n month {}'.format(mstr))
         print('observed ET: {:.3f} m'.format(y.mean()))
         print('rmse ET: {:.3f} mm'.format(rmse * 1000))
         print('rmse {:.3f} %'.format(rmse / y.mean() * 100.))
 
-    et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
-    pred_gs = val_df[et_pred].sum(axis=1)
-    label_gs = val_df[et_cols].sum(axis=1)
-    season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
-    print('mean predicted ET: {:.3f} m'.format(pred_gs.mean()))
-    print('mean observed ET: {:.3f} m'.format(label_gs.mean()))
-    print('seasonal rmse ET: {:.3f} mm'.format(season_rmse * 1000))
-    print('rmse: {:.3f}%'.format(season_rmse / label_gs.mean() * 100.))
-    print('predicted {} targets: '.format(len(targets)))
-    print(targets, '\n')
-    print('predicted on {} features: '.format(len(features)))
-    print(features, '\n')
+    # et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
+    # pred_gs = val_df[et_pred].sum(axis=1)
+    # label_gs = val_df[et_cols].sum(axis=1)
+    # season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
+    # print('\nmean predicted ET: {:.3f} m'.format(pred_gs.mean()))
+    # print('mean observed ET: {:.3f} m'.format(label_gs.mean()))
+    # print('mean difference ET: {:.3f} m'.format((pred_gs - label_gs).mean()))
+    # print('seasonal rmse ET: {:.3f} m'.format(season_rmse))
+    #
+    # print('predicted {} targets: '.format(len(targets)))
+    # print(targets, '\n')
+    # print('predicted on {} features: '.format(len(features)))
+    # print(features, '\n')
 
     if out_fig:
         plot_regressions(val_df, out_fig)
@@ -216,19 +254,24 @@ def write_histograms(csv, fig_dir):
         print(col)
 
 
+def plot_loss(history):
+    plt.plot(history.history['loss'], label='loss')
+    plt.plot(history.history['val_loss'], label='val_loss')
+    plt.ylim([0, 10])
+    plt.xlabel('Epoch')
+    plt.ylabel('Error [MPG]')
+    plt.legend()
+    plt.grid(True)
+
+
 if __name__ == '__main__':
     home = os.path.expanduser('~')
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
-    extracts = os.path.join(root, 'expansion', 'tables', 'band_extracts')
-    r = os.path.join(extracts, 'bands_29DEC2022')
-    # study_wide_accuracy(r, 'bands_29DEC2022', 2020)
-    prepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    study_area = os.path.join(prepped, 'bands_29DEC2022_all_2020.csv')
-    random_forest(study_area, show_importance=True)
 
-    original = os.path.join(root, 'expansion', 'tables', 'band_extracts', 'bands_29NOV2022')
-    original_domain = os.path.join(original, 'domain_2020.csv')
-    # random_forest(original_domain)
+    prepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
+    study_area = os.path.join(prepped, 'bands_29DEC2022_2020.csv')
+    # model_data(study_area, 'random_forest', clamp_et=True)
+    model_data(study_area, 'dnn', clamp_et=False)
 # ========================= EOF ====================================================================

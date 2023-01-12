@@ -75,8 +75,8 @@ def get_geomteries():
     return uinta, test_point
 
 
-def export_classification(extracts, asset_root, region, years, bag_fraction=0.5, min_irr_years=5, irr_mask=True):
-
+def export_classification(extracts, asset_root, region, years, bag_fraction=0.5, min_irr_years=5,
+                          irr_mask=True, gridmet_res=False):
     irr_coll = ee.ImageCollection(RF_ASSET)
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
     remap = coll.map(lambda img: img.lt(1))
@@ -84,13 +84,14 @@ def export_classification(extracts, asset_root, region, years, bag_fraction=0.5,
     proj = ee.Projection('EPSG:5071').getInfo()
 
     for yr in years:
-
         targets, input_props = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)], PROPS
         roi = ee.FeatureCollection(region)
-        input_bands = stack_bands(yr, roi).resample('bilinear').reproject(crs=proj['crs'], scale=30)
+        input_bands = stack_bands(yr, roi, gridmet_res=gridmet_res)
+
+        if not gridmet_res:
+            input_bands = input_bands.resample('bilinear').reproject(crs=proj['crs'], scale=30)
 
         for target, month in zip(targets, range(4, 11)):
-
             cols = input_props + [target]
             table_ = os.path.join(extracts, 'bands_29DEC2022_{}'.format(yr))
             fc = ee.FeatureCollection(table_).select(cols)
@@ -125,11 +126,11 @@ def export_classification(extracts, asset_root, region, years, bag_fraction=0.5,
             classified_img = classified_img.clip(roi.geometry())
 
             asset_id = os.path.join(asset_root, desc)
+
             task = ee.batch.Export.image.toAsset(
                 image=classified_img,
                 description=desc,
                 assetId=asset_id,
-                scale=30,
                 pyramidingPolicy={'.default': 'mean'},
                 maxPixels=1e13)
 
@@ -177,7 +178,7 @@ def request_band_extract(file_prefix, points_layer, region, years):
             print(desc)
 
 
-def stack_bands(yr, roi):
+def stack_bands(yr, roi, gridmet_res=False):
     """
     Create a stack of bands for the year and region of interest specified.
     :param yr:
@@ -194,6 +195,7 @@ def stack_bands(yr, roi):
     tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250')
     tpi_250 = elev.subtract(elev.focal_mean(250, 'circle', 'meters')).add(0.5).rename('tpi_250')
     tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150')
+
     input_bands = input_bands.addBands([terrain, tpi_1250, tpi_250, tpi_150])
 
     water_year_start = '{}-10-01'.format(yr - 1)
@@ -212,7 +214,6 @@ def stack_bands(yr, roi):
                        (late_spring_s, late_spring_e, 'lspr', (5, 7)),
                        (summer_s, summer_e, 'sum', (7, 9)),
                        (winter_s, winter_e, 'win', (1, 3))]:
-
         gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
             roi).filterDate(s, e).select('pr', 'etr', 'tmmn', 'tmmx')
 
@@ -240,6 +241,13 @@ def stack_bands(yr, roi):
     et = irr_et_data(yr)
     input_bands = input_bands.addBands([et, awc, clay, ksat, sand])
     input_bands = input_bands.clip(roi)
+
+    if gridmet_res:
+        grid = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").first()
+        proj = grid.projection().getInfo()
+        crs = ee.Projection('EPSG:4326').getInfo()['crs']
+        input_bands = input_bands.resample('bilinear').reproject(crs=crs, scale=1000)
+
     return input_bands
 
 
@@ -281,7 +289,7 @@ def irr_et_data(yr):
     return bands
 
 
-def extract_point_data(tables, bucket, years, description, features=None, min_years=0, debug=False):
+def extract_point_data(tables, bucket, years, description, debug=False):
     """
     Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
     Use this to get e.g. irrigated area within a county, HUC, or state. This can mask based on Crop Data Layer,
@@ -491,10 +499,10 @@ if __name__ == '__main__':
     # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
 
     extract_loc = 'users/dgketchum/expansion/tables_29DEC2022/'
-    ic = 'users/dpendergraph/expansion/eff_ppt'
-    years_ = [x for x in range(1987, 2005)]
+    ic = 'users/dgketchum/expansion/eff_ppt_1km'
+    years_ = [x for x in range(1987, 2021)]
     years_.reverse()
     clip = 'users/dgketchum/expansion/study_area_dissolve'
-    export_classification(extract_loc, ic, clip, years_, irr_mask=True)
+    export_classification(extract_loc, ic, clip, years_, irr_mask=False, gridmet_res=True)
 
 # ========================= EOF ====================================================================

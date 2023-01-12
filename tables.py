@@ -129,7 +129,7 @@ def centroid_strip_attr(in_shp, out_shp):
     print(out_shp)
 
 
-def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end_year=2021, glob='glob',
+def merge_gridded_flow_data(gridded_dir, out_dir, flow_dir=None, start_year=1987, end_year=2021, glob='glob',
                             join_key='STAID'):
     missing, missing_ct, processed_ct = [], 0, 0
 
@@ -163,7 +163,7 @@ def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end
             pass
 
     df = df.copy()
-    df['STAID_STR'] = [str(x).rjust(8, '0') for x in list(df.index.values)]
+    df['{}_STR'.format(join_key)] = [str(x).rjust(8, '0') for x in list(df.index.values)]
 
     dfd = df.to_dict(orient='records')
     s, e = '{}-01-01'.format(start_year), '{}-12-31'.format(end_year)
@@ -173,7 +173,7 @@ def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end
 
     for d in dfd:
         try:
-            sta = d['STAID_STR']
+            sta = d['{}_STR'.format(join_key)]
 
             irr, cc, et, ietr, ept = [], [], [], [], []
             for y, m in months:
@@ -208,9 +208,12 @@ def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end
 
             recs = pd.DataFrame(dict([(x[1], x[0]) for x in [irr, et, cc, ppt, etr, ietr, ept]]), index=idx)
 
-            q_file = os.path.join(flow_dir, '{}.csv'.format(sta))
-            qdf = hydrograph(q_file)
-            h = pd.concat([qdf, recs], axis=1)
+            if flow_dir:
+                q_file = os.path.join(flow_dir, '{}.csv'.format(sta))
+                qdf = hydrograph(q_file)
+                h = pd.concat([qdf, recs], axis=1)
+            else:
+                h = recs
 
             file_name = os.path.join(out_dir, '{}.csv'.format(sta))
             h.to_csv(file_name)
@@ -243,9 +246,9 @@ if __name__ == '__main__':
     bands_out = os.path.join(root, 'tables', 'prepped_bands', 'bands_29DEC2022')
     # prep_extracts(extracts, bands_out, clamp_et=True)
 
-    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'extracts_ietr_nater_8JAN2022')
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_nater_8JAN2022')
+    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'extracts_ietr_huc8_natet_9JAN2022')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_huc8_natet_9JAN2022')
     hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
-    merge_gridded_flow_data(basin_extracts, hydrographs_, merged, glob='ietr_8JAN2023')
+    merge_gridded_flow_data(basin_extracts, merged, flow_dir=None, glob='ietr_huc8_8JAN2023', join_key='huc8')
 
 # ========================= EOF ====================================================================

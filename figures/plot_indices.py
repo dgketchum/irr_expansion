@@ -9,9 +9,9 @@ def plot_indices_panel(df, met_param, cu_timescale, end_mo, fig_, title_str=None
     plt.figure(figsize=(12, 6))
 
     ax1 = plt.subplot(2, 3, 1)
-    ax1.set(xlabel='{} - 12 Month'.format(met_param), ylabel='SSFI - 12 Month')
+    ax1.set(xlabel='{} - 12 Month'.format(met_param), ylabel='SFI - 12 Month')
     ax1.title.set_text('Standardized Streamflow Index')
-    ax1.scatter(oct_df['{}'.format(met_param)], oct_df['SSFI_12'], s=15, marker='.', c='k')
+    ax1.scatter(oct_df['{}'.format(met_param)], oct_df['SFI_12'], s=15, marker='.', c='k')
 
     ax2 = plt.subplot(2, 3, 3)
     ax2.set(xlabel='{} - 12 Month'.format(met_param), ylabel='SCUI - {} Months'.format(cu_timescale))
@@ -28,7 +28,7 @@ def plot_indices_panel(df, met_param, cu_timescale, end_mo, fig_, title_str=None
     [ax.set_xlim(lim) for ax in [ax1, ax2, ax3]]
 
     ax4 = plt.subplot(2, 1, 2)
-    df[['SPI_12', 'SPEI_12', 'SSFI_12']].plot(ax=ax4, color=['g', 'purple', 'k'])
+    df[['SPI_12', 'SPEI_12', 'SFI_12']].plot(ax=ax4, color=['g', 'purple', 'k'])
     ax4.scatter(oct_df.index, oct_df['SCUI_{}'.format(cu_timescale)], label='SCUI', s=5, marker='+', c='b')
     ax4.scatter(oct_df.index, oct_df['SIMI_{}'.format(cu_timescale)], label='SIMI', s=5, marker='+', c='r')
     ax4.legend(loc=2)
