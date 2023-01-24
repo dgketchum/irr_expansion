@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+from pprint import pprint
 from copy import deepcopy
 from subprocess import check_call
 from calendar import monthrange
@@ -15,6 +16,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.tools import saved_model_utils
+from tensorflow.python.lib.io import file_io
 
 from call_ee import PROPS, stack_bands
 
@@ -37,7 +39,7 @@ OUTPUT_BUCKET = 'wudr'
 REGION = 'us-central1'
 MODEL_DIR = 'gs://wudr/ept_model'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
-VERSION_NAME = 'v00'
+VERSION_NAME = 'v01'
 
 
 class DNN:
@@ -61,48 +63,45 @@ class DNN:
         self.model = self._build_and_compile_model()
 
     def _build_and_compile_model(self):
-        model = keras.Sequential([
-            self.normalizer,
-            layers.Dense(90, activation='relu'),
-            layers.Dense(150, activation='relu'),
-            layers.Dense(300, activation='relu'),
-            layers.Dense(150, activation='relu'),
-            layers.Dense(90, activation='relu'),
-            layers.Dense(60, activation='relu'),
-            layers.Dense(1)
+
+        model = tf.keras.models.Sequential([
+            tf.keras.layers.Input((None, None, len(PROPS),)),
+            tf.keras.layers.Conv2D(64, (1, 1), activation=tf.nn.relu),
+            tf.keras.layers.Dropout(0.1),
+            tf.keras.layers.Conv2D(1, (1, 1), activation=tf.nn.softmax)
         ])
         model.compile(loss='mean_absolute_error',
                       optimizer=tf.keras.optimizers.Adam(0.001))
         return model
 
-    def fit(self, x, y):
-        self.model.fit(x, y, verbose=1, epochs=20, batch_size=2560)
+    def to_tuple(self, inputs, label):
+        return (tf.expand_dims(tf.transpose(list(inputs.values())), 1),
+                tf.expand_dims(tf.transpose(list(label.values())), 1))
 
-    def train(self, csv, month, clamp_et=False):
+    def _prep_csv(self, csv, month):
         c = pd.read_csv(csv)
         t_et_cols = ['et_{}'.format(mm) for mm in range(4, 11)]
         for etc in t_et_cols:
             c[etc] = c[etc].values.astype(float) * 0.00001
 
-        c['season'] = c[t_et_cols].sum(axis=1)
-        print(c.shape)
-        if clamp_et:
-            c = c[c['season'] < c['ppt_wy_et'] * 0.001]
+        return c
 
-        c.drop(columns=['season'], inplace=True)
+
+
+    def train(self, csv, month):
+        c = self._prep_csv(csv, month)
 
         split = int(c.shape[0] * 0.8)
 
         targets, features, first = [], None, True
         df = deepcopy(c.iloc[:split, :])
-        mstr = str(m)
         target = 'et_{}'.format(month)
+        targets.append(target)
 
         df.dropna(axis=0, inplace=True)
         y = tf.convert_to_tensor(df[target].values.astype('float32'))
         df = df[PROPS]
         x = tf.convert_to_tensor(df.values.astype('float32'))
-        targets.append(target)
         print('training on {}'.format(df.shape[0]))
 
         val = deepcopy(c.iloc[split:, :])
@@ -112,21 +111,18 @@ class DNN:
         x_test = tf.convert_to_tensor(val.values.astype('float32'))
         print('validating on {}'.format(val.shape[0]))
 
-        nn.prepare(x)
-        nn.fit(x, y)
-        nn.save()
-        y_pred = nn.predict(x_test)
+        self.prepare(x)
+        self.model.fit(x, y, verbose=1, epochs=20, batch_size=2560)
+        y_pred = self.model.predict(x_test).flatten()
 
         rmse = mean_squared_error(y_test, y_pred, squared=False)
 
+        mstr = str(m)
         print('\n month {}'.format(mstr))
         print('observed ET: {:.3f} m'.format(np.array(y).mean()))
         print('rmse ET: {:.3f} mm'.format(rmse * 1000))
         print('rmse {:.3f} %'.format(rmse / np.array(y).mean() * 100.))
         print('trained on {}'.format(PROPS))
-
-    def predict(self, x_test):
-        return self.model.predict(x_test).flatten()
 
     def save(self):
         self.model.save(self.model_dir, save_format='tf')
@@ -243,6 +239,30 @@ class DNN:
         task.start()
         print(asset_id, target_str)
 
+    def load(self):
+        self.model = tf.keras.models.load_model(self.model_dir)
+
+    def predict_csv(self, csv, month):
+
+        if not self.model:
+            raise NotImplemented
+
+        df = self._prep_csv(csv, month)
+        target = 'et_{}'.format(month)
+
+        df.dropna(axis=0, inplace=True)
+        y = tf.convert_to_tensor(df[target].values.astype('float32'))
+        df = df[PROPS]
+        x = tf.convert_to_tensor(df.values.astype('float32'))
+        y_pred = self.model.predict(x).flatten()
+        rmse = mean_squared_error(y, y_pred, squared=False)
+
+        print('\n month {}'.format(m))
+        print('observed ET: {:.3f} m'.format(np.array(y).mean()))
+        print('rmse ET: {:.3f} mm'.format(rmse * 1000))
+        print('rmse {:.3f} %'.format(rmse / np.array(y).mean() * 100.))
+        print('predicted on {}'.format(PROPS))
+
 
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
@@ -261,8 +281,11 @@ if __name__ == '__main__':
         nn = DNN(label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
         nn.train(training, m)
-        nn.deploy()
-        scale_ = 1000
-        nn.infer(asset_rt, clip, scale_, 2020, m)
+        # nn.save()
+        # nn.load(model_dir)
+        # nn.predict_csv(training, m)
+        # nn.deploy()
+        # scale_ = 1000
+        # nn.infer(asset_rt, clip, scale_, 2020, m)
 
 # ========================= EOF ====================================================================
