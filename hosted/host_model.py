@@ -1,6 +1,7 @@
 import os
 import json
 from copy import deepcopy
+from subprocess import check_call
 
 import numpy as np
 import pandas as pd
@@ -13,39 +14,48 @@ from tensorflow.python.tools import saved_model_utils
 
 from call_ee import PROPS
 
+home = os.path.expanduser('~')
+conda = os.path.join(home, 'miniconda3', 'envs')
+if not os.path.exists(conda):
+    conda = conda.replace('miniconda3', 'miniconda')
+EE = os.path.join(conda, 'irrimp', 'bin', 'earthengine')
+GS = '/home/dgketchum/google-cloud-sdk/bin/gsutil'
+
 PROJECT = 'ssebop-montana'
+MODEL_NAME = 'ept_model'
 DATA_BUCKET = 'wudr'
 OUTPUT_BUCKET = 'wudr'
 REGION = 'us-central1'
-
-LABEL = 'et_2020_10'
-
-FEATURE_NAMES = list(PROPS)
-FEATURE_NAMES.append(LABEL)
-
-columns = [
-    tf.io.FixedLenFeature(shape=[1], dtype=tf.float32) for k in FEATURE_NAMES
-]
-FEATURES_DICT = dict(zip(FEATURE_NAMES, columns))
-
 MODEL_DIR = 'gs://wudr/ept_model'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
 MODEL_NAME = 'ept_dnn_model'
-VERSION_NAME = 'v0'
+VERSION_NAME = 'v00'
 
 
 class DNN:
-    def __init__(self, x, _dir=None):
+    def __init__(self, x, label=None, _dir=None):
         self.normalizer = tf.keras.layers.Normalization(axis=-1)
         self.normalizer.adapt(x)
         self.dnn_model = self.build_and_compile_model()
-        self._dir = _dir
+        self.model_dir = _dir
+        self.label = label
+
+        if _dir and label:
+            self.ee_dir = os.path.join(EEIFIED_DIR, self.label)
+            self.feature_names = list(PROPS)
+            self.feature_names.append(self.label)
+            columns = [tf.io.FixedLenFeature(shape=[1], dtype=tf.float32) for _ in self.feature_names]
+            self.features_dict = dict(zip(self.feature_names, columns))
 
     def build_and_compile_model(self):
         model = keras.Sequential([
             self.normalizer,
-            layers.Dense(256, activation='relu'),
-            layers.Dense(256, activation='relu'),
+            layers.Dense(90, activation='relu'),
+            layers.Dense(150, activation='relu'),
+            layers.Dense(300, activation='relu'),
+            layers.Dense(150, activation='relu'),
+            layers.Dense(90, activation='relu'),
+            layers.Dense(60, activation='relu'),
             layers.Dense(1)
         ])
         model.compile(loss='mean_absolute_error',
@@ -53,16 +63,16 @@ class DNN:
         return model
 
     def fit(self, x, y):
-        self.dnn_model.fit(x, y, verbose=1, epochs=200, batch_size=256)
+        self.dnn_model.fit(x, y, verbose=1, epochs=1, batch_size=2560)
 
     def predict(self, x_test):
         return self.dnn_model.predict(x_test).flatten()
 
     def save(self):
-        self.dnn_model.save(self._dir, save_format='tf')
+        self.dnn_model.save(self.model_dir, save_format='tf')
 
-    def eeify(self):
-        meta_graph_def = saved_model_utils.get_meta_graph_def(MODEL_DIR, 'serve')
+    def deploy(self):
+        meta_graph_def = saved_model_utils.get_meta_graph_def(self.model_dir, 'serve')
         inputs = meta_graph_def.signature_def['serving_default'].inputs
         outputs = meta_graph_def.signature_def['serving_default'].outputs
         input_name = None
@@ -75,40 +85,62 @@ class DNN:
             output_name = v.name
             break
 
-        input_dict = "'" + json.dumps({input_name: "array"}) + "'"
-        output_dict = "'" + json.dumps({output_name: "output"}) + "'"
-        print(input_dict)
-        print(output_dict)
+        input_dict = json.dumps({input_name: "array"})
+        output_dict = json.dumps({output_name: "output"})
+
+        cmd = ['earthengine',
+               'model',
+               'prepare',
+               '--source_dir',
+               self.model_dir,
+               '--dest_dir',
+               self.ee_dir,
+               '--input',
+               input_dict,
+               '--output',
+               output_dict]
+
+        check_call(cmd)
+
+        cmd = ['gcloud',
+               'ai-platform',
+               'models',
+               'create',
+               MODEL_NAME,
+               '--project',
+               PROJECT,
+               '--region',
+               REGION]
+
+        check_call(cmd)
+
+        cmd = ['gcloud',
+               'ai-platform',
+               'versions',
+               'create',
+               VERSION_NAME,
+               '--project',
+               PROJECT,
+               '--region',
+               REGION,
+               '--model',
+               MODEL_DIR,
+               '--origin',
+               self.ee_dir,
+               '--framework',
+               '"TENSORFLOW"',
+               '--runtime-version=2.3',
+               '--python-version=3.7']
+
+        check_call(cmd)
 
 
-def train(csv_dir, glob='bands_29DEC2022', clamp_et=False):
-    l = [os.path.join(csv_dir, x) for x in os.listdir(csv_dir) if glob in x]
-    l.reverse()
-
-    first = True
-    for csv in l:
-        splt = os.path.basename(csv).split('_')
-        y = int(splt[-1][:-4])
-        print(y)
-        if y == 2021:
-            continue
-        if first:
-            c = pd.read_csv(csv)
-            et_cols = ['et_{}_{}'.format(y, mm) for mm in range(4, 11)]
-            t_et_cols = ['et_{}'.format(mm) for mm in range(4, 11)]
-            c = c.rename(columns={k: v for k, v in zip(et_cols, t_et_cols)})
-            first = False
-        else:
-            d = pd.read_csv(csv)
-            et_cols = ['et_{}_{}'.format(y, mm) for mm in range(4, 11)]
-            d = d.rename(columns={k: v for k, v in zip(et_cols, t_et_cols)})
-            c = pd.concat([c, d])
-
-    _file = os.path.join(csv_dir, 'all.csv')
-    c.to_csv(_file)
-
+def train(csv, clamp_et=False):
+    c = pd.read_csv(csv)
+    t_et_cols = ['et_{}'.format(mm) for mm in range(4, 11)]
     for etc in t_et_cols:
         c[etc] = c[etc].values.astype(float) * 0.00001
+
     c['season'] = c[t_et_cols].sum(axis=1)
     print(c.shape)
     if clamp_et:
@@ -138,20 +170,19 @@ def train(csv_dir, glob='bands_29DEC2022', clamp_et=False):
         x_test = tf.convert_to_tensor(val.values.astype('float32'))
         print('validating on {}'.format(val.shape[0]))
 
-        nn = DNN(x, MODEL_DIR)
+        model_dir = os.path.join(MODEL_DIR, target)
+        nn = DNN(x, target, model_dir)
         nn.fit(x, y)
         y_pred = nn.predict(x_test)
         nn.save()
-        nn.eeify()
+        nn.deploy()
 
         rmse = mean_squared_error(y_test, y_pred, squared=False)
 
         print('\n month {}'.format(mstr))
-        print('observed ET: {:.3f} m'.format(y.mean()))
+        print('observed ET: {:.3f} m'.format(np.array(y).mean()))
         print('rmse ET: {:.3f} mm'.format(rmse * 1000))
-        print('rmse {:.3f} %'.format(rmse / y.mean() * 100.))
-
-        return nn
+        print('rmse {:.3f} %'.format(rmse / np.array(y).mean() * 100.))
 
 
 if __name__ == '__main__':
@@ -160,6 +191,6 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS'
 
     tprepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    imp_js = os.path.join(root, 'expansion', 'analysis', 'importance')
-    train(tprepped)
+    training = os.path.join(tprepped, 'all.csv')
+    train(training)
 # ========================= EOF ====================================================================
