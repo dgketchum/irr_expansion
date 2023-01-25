@@ -1,8 +1,7 @@
 import os
 import json
 import subprocess
-from pprint import pprint
-from copy import deepcopy
+
 from subprocess import check_call
 from calendar import monthrange
 from datetime import date
@@ -40,7 +39,8 @@ TRAINING_DATA = 'gs://wudr/tfr_29DEC2022'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
 VERSION_NAME = 'v00'
 
-PROPS = ['elevation', 'slope', 'aspect', 'lat', 'lon', 'etr_gs', 'ppt_wy_et', 'et_gs']
+# PROPS = ['elevation', 'slope', 'aspect', 'lat', 'lon', 'etr_gs', 'ppt_wy_et', 'et_gs']
+PROPS = ['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et', 'et_gs']
 
 
 # ET_COLS = ['et_{}'.format(mm) for mm in range(4, 11)]
@@ -72,16 +72,15 @@ class DNN:
             tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dropout(0.2),
             tf.keras.layers.Dense(128, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(256, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(512, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(256, activation='relu'),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.Dense(128, activation='relu'),
             tf.keras.layers.Dropout(0.1),
+            tf.keras.layers.Dense(256, activation='relu'),
+            tf.keras.layers.Dropout(0.1),
+            tf.keras.layers.Dense(512, activation='relu'),
+            tf.keras.layers.Dense(256, activation='relu'),
+            tf.keras.layers.Dense(128, activation='relu'),
             tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Conv2D(1, (1, 1), activation='linear')
         ])
         model.compile(loss='mean_absolute_error',
@@ -111,14 +110,8 @@ class DNN:
 
     def train(self, batch):
 
-        # training_data = list_bucket_files(TRAINING_DATA)
         training_data = [os.path.join('/media/nvm/tfr/', x) for x in os.listdir('/media/nvm/tfr/')]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
-
-        for raw_record in dataset.take(1):
-            example = tf.train.Example()
-            example.ParseFromString(raw_record.numpy())
-            print(example)
 
         split = 5
         train_dataset = dataset.window(split, split + 1).flat_map(lambda ds: ds)
@@ -144,8 +137,8 @@ class DNN:
 
         reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.8, patience=3, min_lr=0.001)
         early_stopping = EarlyStopping(monitor='val_loss', patience=7, mode='auto', restore_best_weights=True)
-        self.model.fit(x=input_dataset, verbose=1, epochs=100, validation_split=0.,
-                       validation_data=input_test, validation_freq=1, callbacks=[reduce_lr, early_stopping])
+        self.model.fit(x=input_dataset, verbose=1, epochs=100, validation_data=input_test,
+                       validation_freq=1, callbacks=[reduce_lr, early_stopping])
 
         y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
         x_test = np.concatenate([x for x, y in input_test], axis=0)[:, 0, 0, :]
@@ -290,14 +283,15 @@ if __name__ == '__main__':
     clip = 'users/dgketchum/expansion/columbia_basin'
     asset_rt = ic = 'users/dgketchum/expansion/eff_ppt_gcloud'
 
+    tf.keras.utils.set_random_seed(1234)
     m = 'gs'
     t = 'et_{}'.format(m)
     model_dir = os.path.join(MODEL_DIR, t)
     nn = DNN(month=m, label=t, _dir=model_dir)
     nn.model_name = MODEL_NAME.format(m)
     nn.train(256)
-    nn.save()
-    nn.deploy()
+    # nn.save()
+    # nn.deploy()
     # scale_ = 1000
     # nn.infer(asset_rt, clip, scale_, 2020, m)
 
