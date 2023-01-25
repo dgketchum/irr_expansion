@@ -37,7 +37,7 @@ REGION = 'us-central1'
 MODEL_DIR = 'gs://wudr/ept_model'
 TRAINING_DATA = 'gs://wudr/tfr_29DEC2022'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
-VERSION_NAME = 'v00'
+VERSION_NAME = 'v01'
 
 # PROPS = ['elevation', 'slope', 'aspect', 'lat', 'lon', 'etr_gs', 'ppt_wy_et', 'et_gs']
 PROPS = ['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et', 'et_gs']
@@ -290,8 +290,8 @@ if __name__ == '__main__':
     nn = DNN(month=m, label=t, _dir=model_dir)
     nn.model_name = MODEL_NAME.format(m)
     nn.train(256)
-    # nn.save()
-    # nn.deploy()
+    nn.save()
+    nn.deploy()
     # scale_ = 1000
     # nn.infer(asset_rt, clip, scale_, 2020, m)
 
