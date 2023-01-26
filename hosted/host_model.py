@@ -37,7 +37,7 @@ REGION = 'us-central1'
 MODEL_DIR = 'gs://wudr/ept_model'
 TRAINING_DATA = 'gs://wudr/tfr_29DEC2022'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
-VERSION_NAME = 'v01'
+VERSION_NAME = 'v04'
 
 # PROPS = ['elevation', 'slope', 'aspect', 'lat', 'lon', 'etr_gs', 'ppt_wy_et', 'et_gs']
 PROPS = ['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et', 'et_gs']
@@ -110,7 +110,7 @@ class DNN:
 
     def train(self, batch):
 
-        training_data = [os.path.join('/media/nvm/tfr/', x) for x in os.listdir('/media/nvm/tfr/')]
+        training_data = [os.path.join('/media/nvm/tfr/', x) for x in os.listdir('/media/nvm/tfr/') if 'WA' in x]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
         split = 5
@@ -172,6 +172,8 @@ class DNN:
 
         input_dict = json.dumps({input_name: "array"})
         output_dict = json.dumps({output_name: "prediction"})
+
+        print('DEPLOYING {}, {}'.format(self.model_name, VERSION_NAME))
 
         cmd = ['earthengine',
                'model',
@@ -290,8 +292,8 @@ if __name__ == '__main__':
     nn = DNN(month=m, label=t, _dir=model_dir)
     nn.model_name = MODEL_NAME.format(m)
     nn.train(256)
-    nn.save()
-    nn.deploy()
+    # nn.save()
+    # nn.deploy()
     # scale_ = 1000
     # nn.infer(asset_rt, clip, scale_, 2020, m)
 
