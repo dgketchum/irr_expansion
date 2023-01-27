@@ -23,15 +23,16 @@ WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
 BASIN_STATES = ['AZ', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
-PROPS = ['anm_ppt_gs', 'anm_ppt_lspr', 'anm_ppt_spr', 'anm_ppt_sum', 'anm_ppt_win', 'anm_ppt_wy', 'anm_ppt_wy_et',
-         'anm_ppt_wy_spr', 'anm_temp_gs', 'anm_temp_lspr', 'anm_temp_spr', 'anm_temp_sum', 'anm_temp_win',
-         'anm_temp_wy', 'anm_temp_wy_et', 'anm_temp_wy_spr', 'aspect', 'awc', 'clay', 'cwd_gs', 'cwd_lspr', 'cwd_spr',
-         'cwd_sum', 'cwd_win', 'cwd_wy', 'cwd_wy_et', 'cwd_wy_spr', 'elevation', 'etr_gs', 'etr_lspr', 'etr_spr',
-         'etr_sum', 'etr_win', 'etr_wy', 'etr_wy_et', 'etr_wy_spr', 'ksat',
-         'lat', 'lon',
-         'ppt_gs', 'ppt_lspr', 'ppt_spr', 'ppt_sum', 'ppt_win', 'ppt_wy', 'ppt_wy_et', 'ppt_wy_spr', 'sand', 'slope',
-         'tmp_gs', 'tmp_lspr', 'tmp_spr', 'tmp_sum', 'tmp_win', 'tmp_wy', 'tmp_wy_et', 'tmp_wy_spr', 'tpi_1250',
-         'tpi_150', 'tpi_250']
+PROPS = sorted(
+    ['anm_ppt_gs', 'anm_ppt_lspr', 'anm_ppt_spr', 'anm_ppt_sum', 'anm_ppt_win', 'anm_ppt_wy', 'anm_ppt_wy_et',
+     'anm_ppt_wy_spr', 'anm_temp_gs', 'anm_temp_lspr', 'anm_temp_spr', 'anm_temp_sum', 'anm_temp_win',
+     'anm_temp_wy', 'anm_temp_wy_et', 'anm_temp_wy_spr', 'aspect', 'awc', 'clay', 'cwd_gs', 'cwd_lspr', 'cwd_spr',
+     'cwd_sum', 'cwd_win', 'cwd_wy', 'cwd_wy_et', 'cwd_wy_spr', 'elevation', 'etr_gs', 'etr_lspr', 'etr_spr',
+     'etr_sum', 'etr_win', 'etr_wy', 'etr_wy_et', 'etr_wy_spr', 'ksat',
+     'lat', 'lon',
+     'ppt_gs', 'ppt_lspr', 'ppt_spr', 'ppt_sum', 'ppt_win', 'ppt_wy', 'ppt_wy_et', 'ppt_wy_spr', 'sand', 'slope',
+     'tmp_gs', 'tmp_lspr', 'tmp_spr', 'tmp_sum', 'tmp_win', 'tmp_wy', 'tmp_wy_et', 'tmp_wy_spr', 'tpi_1250',
+     'tpi_150', 'tpi_250'])
 
 SUBPROPS = ['aspect', 'elevation', 'slope']
 
@@ -236,7 +237,7 @@ def request_band_extract(file_prefix, points_layer, region, years, scale=1000):
             print(desc)
 
 
-def stack_bands(yr, roi, scale):
+def stack_bands(yr, roi, resolution, **scale_factors):
     """
     Create a stack of bands for the year and region of interest specified.
     :param yr:
@@ -245,16 +246,19 @@ def stack_bands(yr, roi, scale):
     :return:
     """
 
-    input_bands = ee.Image.pixelLonLat().rename(['lon', 'lat']).multiply(0.001)
+    non_scale = {'climate': 1, 'terrain': 1, 'soil': 1}
+    if not scale_factors:
+        scale_factors = non_scale
+
     ned = ee.Image('USGS/NED')
-    terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect').multiply(0.001)
-
+    terrain = ee.Terrain.products(ned).select('elevation', 'slope', 'aspect')
     elev = terrain.select('elevation')
-    tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250').multiply(0.001)
-    tpi_250 = elev.subtract(elev.focal_mean(250, 'circle', 'meters')).add(0.5).rename('tpi_250').multiply(0.001)
-    tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150').multiply(0.001)
+    tpi_1250 = elev.subtract(elev.focal_mean(1250, 'circle', 'meters')).add(0.5).rename('tpi_1250')
+    tpi_250 = elev.subtract(elev.focal_mean(250, 'circle', 'meters')).add(0.5).rename('tpi_250')
+    tpi_150 = elev.subtract(elev.focal_mean(150, 'circle', 'meters')).add(0.5).rename('tpi_150')
+    terrain = terrain.addBands([tpi_1250, tpi_250, tpi_150])
 
-    input_bands = input_bands.addBands([terrain, tpi_1250, tpi_250, tpi_150])
+    input_bands = terrain.multiply(scale_factors['terrain'])
 
     water_year_start = '{}-10-01'.format(yr - 1)
     et_water_year_start, et_water_year_end = '{}-11-01'.format(yr - 1), '{}-11-01'.format(yr)
@@ -272,7 +276,6 @@ def stack_bands(yr, roi, scale):
                        (late_spring_s, late_spring_e, 'lspr', (5, 7)),
                        (summer_s, summer_e, 'sum', (7, 9)),
                        (winter_s, winter_e, 'win', (1, 3))]:
-
         gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
             roi).filterDate(s, e).select('pr', 'etr', 'tmmn', 'tmmx')
 
@@ -281,40 +284,50 @@ def stack_bands(yr, roi, scale):
         temp = ee.Image([tmx, tmn]).reduce(ee.Reducer.mean())
         temp = temp.subtract(273.15).multiply(0.1).rename('tmp_{}'.format(n))
 
-        ppt = gridmet.select('pr').reduce(ee.Reducer.sum()).multiply(0.001).rename('ppt_{}'.format(n))
-        etr = gridmet.select('etr').reduce(ee.Reducer.sum()).multiply(0.001).rename('etr_{}'.format(n))
+        ppt = gridmet.select('pr').reduce(ee.Reducer.sum())
+        ppt = ppt.multiply(scale_factors['climate']).rename('ppt_{}'.format(n))
+        etr = gridmet.select('etr').reduce(ee.Reducer.sum())
+        etr = etr.multiply(scale_factors['climate']).rename('etr_{}'.format(n))
 
         wd_estimate = ppt.subtract(etr).rename('cwd_{}'.format(n))
 
         worldclim_prec = get_world_climate(months=m, param='prec').rename('wrldclmppt_{}'.format(n))
-        anom_prec = ppt.subtract(worldclim_prec).rename('anm_ppt_{}'.format(n))
+        anom_prec = ppt.subtract(worldclim_prec).rename('anm_ppt_{}'.format(n)).multiply(scale_factors['climate'])
+
         worldclim_temp = get_world_climate(months=m, param='tavg').rename('wrldclmtmp_{}'.format(n))
-        anom_temp = temp.subtract(worldclim_temp).multiply(0.01).rename('anm_temp_{}'.format(n))
+        anom_temp = temp.subtract(worldclim_temp)
+        anom_temp = anom_temp.multiply(scale_factors['climate']).rename('anm_temp_{}'.format(n))
 
         input_bands = input_bands.addBands([temp, wd_estimate, ppt, etr, anom_prec, anom_temp])
 
-    awc = ee.Image('users/dgketchum/soils/ssurgo_AWC_WTA_0to152cm_composite').multiply(0.01).rename('awc')
-    clay = ee.Image('users/dgketchum/soils/ssurgo_Clay_WTA_0to152cm_composite').multiply(0.01).rename('clay')
-    ksat = ee.Image('users/dgketchum/soils/ssurgo_Ksat_WTA_0to152cm_composite').multiply(0.01).rename('ksat')
-    sand = ee.Image('users/dgketchum/soils/ssurgo_Sand_WTA_0to152cm_composite').multiply(0.01).rename('sand')
+    awc = ee.Image('users/dgketchum/soils/ssurgo_AWC_WTA_0to152cm_composite')
+    awc = awc.multiply(scale_factors['soil']).rename('awc')
+    clay = ee.Image('users/dgketchum/soils/ssurgo_Clay_WTA_0to152cm_composite')
+    clay = clay.multiply(scale_factors['soil']).rename('clay')
+    ksat = ee.Image('users/dgketchum/soils/ssurgo_Ksat_WTA_0to152cm_composite')
+    ksat = ksat.multiply(scale_factors['soil']).rename('ksat')
+    sand = ee.Image('users/dgketchum/soils/ssurgo_Sand_WTA_0to152cm_composite')
+    sand = sand.multiply(scale_factors['soil']).rename('sand')
 
-    et = irr_et_data(yr)
+    et = irr_et_data(yr, resolution)
+
     season = et.reduce(ee.Reducer.sum()).rename('et_gs')
-    input_bands = input_bands.addBands([et, season, awc, clay, ksat, sand])
+    ratio = season.divide(input_bands.select('ppt_wy_et')).rename('ratio')
+    input_bands = input_bands.addBands([et, ratio, season, awc, clay, ksat, sand])
     input_bands = input_bands.clip(roi)
 
-    crs = ee.Projection('EPSG:4326').getInfo()['crs']
-    input_bands = input_bands.reproject(crs=crs, scale=scale)
+    proj = ee.Projection('EPSG:4326')
+    input_bands = input_bands.reproject(crs=proj.crs(), scale=resolution)
 
     return input_bands
 
 
-def irr_et_data(yr):
+def irr_et_data(yr, scale):
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
     bands = None
-
+    names = []
     for month in range(4, 11):
         s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
         end_day = monthrange(yr, month)[1]
@@ -335,15 +348,23 @@ def irr_et_data(yr):
         et_coll = annual_coll_.filter(ee.Filter.date(s, e))
         et_umrb = et_coll.sum().clip(umrb_clip.geometry())
 
-        et_str = 'et_{}'.format(month)
+        names.append('et_{}'.format(month))
         et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
-        et = et_sum.multiply(0.00001).rename(et_str)
+        et = et_sum.multiply(0.00001)
+
+        # TODO make this an optional argument
+        # proj = ee.Projection('EPSG:4326').getInfo()
+        # crs = proj['crs']
+        # et = et.setDefaultProjection(proj)
+        # et = et.reproject(crs=crs, scale=scale)
+        # et = et.reduceResolution(reducer=ee.Reducer.mean(), bestEffort=True)
 
         if month == 4:
             bands = et
         else:
             bands = bands.addBands([et])
 
+    bands = bands.rename(names)
     return bands
 
 
@@ -548,18 +569,11 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    points_ = 'users/dgketchum/expansion/points/pts_29DEC2022'
-    bucket = 'wudr'
-    years_ = [x for x in range(1987, 2021)]
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
-    request_band_extract('bands_29DEC2022', points_, clip, years_, 30)
-
     pts = 'users/dgketchum/expansion/pts_29DEC2022'
     # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
 
     extract_loc = 'users/dgketchum/expansion/tables_29DEC2022/'
     ic = 'users/dgketchum/expansion/eff_ppt_indir'
-    years_.reverse()
     # export_classification(extract_loc, ic, clip, years_, irr_mask=False, gridmet_res=True)
     clip = 'users/dgketchum/expansion/columbia_basin'
     mask = 'users/dgketchum/expansion/test_buff_env'
