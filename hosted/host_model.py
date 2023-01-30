@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from subprocess import check_call, CalledProcessError
 from calendar import monthrange
 from datetime import date
@@ -14,6 +15,9 @@ from keras.callbacks import ReduceLROnPlateau, EarlyStopping
 
 import tensorflow as tf
 from tensorflow.python.tools import saved_model_utils
+
+from googleapiclient import discovery
+from googleapiclient import errors
 
 from call_ee import stack_bands, BASIN_STATES, BOUNDARIES
 from assets import list_bucket_files
@@ -37,13 +41,6 @@ REGION = 'us-central1'
 MODEL_DIR = 'gs://wudr/ept_model'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
 VERSION_SCALE = 1000
-VERSION_NAME = 'v00'
-
-PROPS = sorted(['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et'])
-
-
-# ET_COLS = ['et_{}'.format(mm) for mm in range(4, 11)]
-# PROPS = PROPS + ['et_gs']
 
 
 class DNN:
@@ -106,10 +103,9 @@ class DNN:
         feats = tf.expand_dims(tf.transpose(list(inputs.values())), 1)
         return feats, lb1
 
-    def train(self, batch, save_test_data=None):
+    def train(self, batch, data_dir, save_test_data=None):
 
-        nvm = '/media/nvm/tfr/'
-        training_data = [os.path.join(nvm, p) for p in os.listdir(nvm)]
+        training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
         split = 5
@@ -118,6 +114,7 @@ class DNN:
 
         input_dataset = parsed_training.map(self.to_tuple)
         input_dataset = input_dataset.shuffle(1000).batch(batch)
+        samp = iter(input_dataset).next()
 
         test_dataset = dataset.skip(split).window(1, split + 1).flat_map(lambda ds: ds)
         parsed_test = test_dataset.map(self.parse_tfrecord, num_parallel_calls=5)
@@ -129,7 +126,7 @@ class DNN:
 
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, min_lr=0.001, cooldown=3)
         early_stopping = EarlyStopping(monitor='val_loss', patience=10, mode='auto', restore_best_weights=True)
-        self.model.fit(x=input_dataset, verbose=1, epochs=10, validation_data=input_test,
+        self.model.fit(x=input_dataset, verbose=1, epochs=1000, validation_data=input_test,
                        validation_freq=1, callbacks=[reduce_lr, early_stopping])
 
         y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
@@ -139,7 +136,7 @@ class DNN:
         if save_test_data:
             df = pd.DataFrame(columns=['y_test', 'y_pred'], data=np.array([y_test, y_pred])[:, :, 0].T)
             df[self.feature_names] = x_test
-            # df.to_csv(save_test_data, float_format='%.4f')
+            df.to_csv(save_test_data, float_format='%.4f')
 
         rmse = mean_squared_error(y_test, y_pred, squared=False)
         print('target {}'.format(self.target))
@@ -282,40 +279,6 @@ class DNN:
         task.start()
         print(asset_id, target_str)
 
-    def tfrecord_vs_raster(self):
-        band_order = ['aspect', 'elevation', 'slope', 'ppt_wy_et', 'etr_gs', 'ppt_gs']
-        unord_ind = [band_order.index(p) for p in self.feature_names]
-        with rasterio.open('/home/dgketchum/Downloads/ept_30m_6_bands.tif') as src:
-            img = src.read()
-            img = img[unord_ind, :, :]
-            img = np.moveaxis(img, 0, 2)
-            img = img.reshape(img.shape[0] * img.shape[1], img.shape[2])
-            img = np.expand_dims(img, axis=1)
-            img = np.expand_dims(img, axis=1)
-
-        ids = tf.data.Dataset.from_tensor_slices(img).batch(256)
-
-        nvm = '/media/nvm/tfr/'
-        training_data = [os.path.join(nvm, p) for p in os.listdir(nvm) if 'WA' in p]
-        dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
-        split = 5
-        test_dataset = dataset.skip(split).window(1, split + 1).flat_map(lambda ds: ds)
-        parsed_test = test_dataset.map(self.parse_tfrecord, num_parallel_calls=5)
-        input_test = parsed_test.map(self.to_tuple)
-        input_test = input_test.batch(256)
-
-        y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
-        print('pred table ET mean: {:.3f} mm'.format(y_pred.mean()))
-        print('pred table ET min: {:.3f} mm'.format(y_pred.min()))
-        print('pred table ET max: {:.3f} mm'.format(y_pred.max()))
-        print('pred table ET std: {:.3f} mm'.format(y_pred.std()))
-        r_pred = self.model.predict(ids)
-        print('pred raster ET mean: {:.3f} mm'.format(r_pred.mean()))
-        print('pred raster ET min: {:.3f} mm'.format(r_pred.min()))
-        print('pred raster ET max: {:.3f} mm'.format(r_pred.max()))
-        print('pred raster ET std: {:.3f} mm'.format(r_pred.std()))
-        pass
-
     def infer_local(self, raster, out_raster):
 
         band_order = ['aspect', 'elevation', 'slope', 'ppt_wy_et', 'etr_gs', 'ppt_gs']
@@ -346,12 +309,59 @@ class DNN:
         self.model = tf.keras.models.load_model(self.model_dir)
 
 
+def remove_models(model_name, gc_project_id):
+
+    project_id = 'projects/{}'.format(gc_project_id)
+    model_id = '{}/models/{}'.format(project_id, model_name)
+
+    ml = discovery.build('ml', 'v1')
+    request = ml.projects().models().versions().list(parent=model_id)
+    response = request.execute()
+
+    if 'versions' in response.keys():
+        versions = response['versions']
+        while len(versions) >= 1:
+            for version in response['versions']:
+                request = ml.projects().models().versions().delete(name=version['name'])
+                try:
+                    request.execute()
+                except errors.HttpError as err:
+                    reason = err._get_reason()
+                    if 'Cannot delete the default version' in reason:
+                        next
+
+            request = ml.projects().models().versions().list(parent=model_id)
+            response = request.execute()
+            time.sleep(1)
+            try:
+                versions = response['versions']
+            except:
+                break
+
+    request = ml.projects().models().delete(name=model_id)
+
+    while True:
+        try:
+            response = request.execute()
+        except errors.HttpError as err:
+            print('There was an error deleting the model.' +
+                  ' Check the details:')
+            reason = err._get_reason()
+            print(reason)
+            if 'A model with versions cannot be deleted' in reason:
+                time.sleep(1)
+                continue
+        break
+
+
 def request_band_extract(file_prefix, points_layer, region, years, clamp_et=False):
     ee.Initialize()
     roi = ee.FeatureCollection(region)
     points = ee.FeatureCollection(points_layer)
 
     for st in BASIN_STATES:
+        if st not in ['CA', 'OR']:
+            continue
         for yr in years:
 
             scale_feats = {'climate': 0.001, 'soil': 0.01, 'terrain': 0.001}
@@ -391,32 +401,47 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    tprepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    training = os.path.join(tprepped, 'all.csv')
-
     clip = 'users/dgketchum/expansion/study_area_dissolve'
     asset_rt = 'users/dgketchum/expansion/eff_ppt_gcloud'
 
     tf.keras.utils.set_random_seed(1234)
-    m = 'gs'
-    t = 'et_{}'.format(m)
-    model_dir = os.path.join(MODEL_DIR, t)
-    nn = DNN(month=m, label=t, _dir=model_dir)
-    nn.model_name = MODEL_NAME.format(m)
-    nn.train(2560)
-    nn.save()
-    nn.deploy()
-    nn.infer_ee(asset_rt, clip, 2020, m, PROPS)
+
+    VERSION_NAME = 'v00'
+    PROPS = sorted(['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et'])
+
+    for m in range(4, 11):
+        t = 'et_{}'.format(m)
+        model_dir = os.path.join(MODEL_DIR, t)
+        nn = DNN(month=m, label=t, _dir=model_dir)
+        nn.model_name = MODEL_NAME.format(m)
+        # nn.train(2560, '/media/nvm/tfr/')
+        # nn.save()
+        # nn.deploy()
+        # nn.infer_ee(asset_rt, clip, 2020, m, PROPS)
+        remove_models(nn.model_name, 'ssebop-montana')
+
+    # VERSION_NAME = 'v01'
+    # from call_ee import PROPS
+    #
+    # for m in range(4, 11):
+    #     t = 'et_{}'.format(m)
+    #     model_dir = os.path.join(MODEL_DIR, t)
+    #     nn = DNN(month=m, label=t, _dir=model_dir)
+    #     nn.model_name = MODEL_NAME.format(m)
+    #     nn.train(2560, '/media/nvm/tfr/')
+    #     nn.save()
+    #     nn.deploy()
+    #     nn.infer_ee(asset_rt, clip, 2019, m, PROPS)
 
     # nn.load()
     # nn.tfrecord_vs_raster()
     # nn.infer_local(raster='/home/dgketchum/Downloads/ept_30m_6_bands.tif',
     #                out_raster='/home/dgketchum/Downloads/ept_pred_30m.tif')
 
-    # points_ = 'users/dgketchum/expansion/points/pts_29DEC2022'
-    # bucket = 'wudr'
-    # years_ = [x for x in range(1987, 2022)]
-    # clip = 'users/dgketchum/expansion/study_area_dissolve'
-    # request_band_extract('bands_29DEC2022', points_, clip, years_, clamp_et=True)
+    points_ = 'users/dgketchum/expansion/points/pts_30JAN2023'
+    bucket = 'wudr'
+    years_ = [x for x in range(1987, 2022)]
+    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    # request_band_extract('bands_30JAN2023', points_, clip, years_, clamp_et=True)
 
 # ========================= EOF ====================================================================

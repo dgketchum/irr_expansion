@@ -11,6 +11,7 @@ from shapely.geometry import Point, shape, mapping
 from rasterstats import zonal_stats
 
 from gage_data import hydrograph
+from call_ee import PROPS
 
 DROP = ['left', 'right', 'top', 'bottom']
 UNCULT_CDL = [62,
@@ -31,12 +32,26 @@ NLCD_UNCULT = [31,
                52,
                71]
 
+STATICS = ['aspect', 'awc', 'clay', 'ksat', 'lat', 'lon', 'sand', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
 
-def join_csv_shapefile(in_shp, csv, out_shape, min_irr_years=20):
+
+def join_csv_shapefile(in_shp, csv, out_shape, join_feat='OPENET_ID'):
     gdf = gpd.read_file(in_shp)
-    gdf.index = gdf['id']
-    gdf.drop(columns=['id'], inplace=True)
-    df = pd.read_csv(csv, index_col='id')
+    gdf.index = gdf[join_feat]
+    gdf.drop(columns=[join_feat], inplace=True)
+    if os.path.isdir(csv):
+        l = [os.path.join(csv, x) for x in os.listdir(csv) if x.endswith('.csv')]
+        first = True
+        for c in l:
+            if first:
+                df = pd.read_csv(c, index_col=join_feat)
+                first = False
+            else:
+                d = pd.read_csv(c, index_col=join_feat)
+                df = pd.concat([df, d])
+
+    else:
+        df = pd.read_csv(csv, index_col=join_feat)
     gdf = gdf.loc[df.index]
     cols = list(df.columns)
     gdf[cols] = df[cols]
@@ -48,12 +63,44 @@ def join_csv_shapefile(in_shp, csv, out_shape, min_irr_years=20):
     print(out_shape)
 
 
-def prep_extracts(in_dir, out_dir, clamp_et=False):
-    ldata = []
-    for yr in range(1987, 2022):
+def dataset_stats(csv_dir, out_dir, icol='OPENET_ID', glob=None):
+    mdf = pd.DataFrame()
+    l = [os.path.join(csv_dir, x) for x in os.listdir(csv_dir) if glob in x and x.endswith('.csv')]
+
+    for p in PROPS:
+        print(p)
+        sdf, first = None, True
+        for i, c in enumerate(l):
+            try:
+                df = pd.read_csv(c, index_col=icol)
+            except ValueError:
+                continue
+            if first:
+                sdf = pd.DataFrame(df[p] * 0.001)
+                if p in STATICS:
+                    break
+                first = False
+            else:
+                s = df[p] * 0.001
+                sdf = pd.concat([sdf, s], axis=1, ignore_index=False)
+
+        mdf[p] = (sdf.min()[p], sdf.mean()[p], sdf.max()[p])
+    all_file = os.path.join(out_dir, '{}.csv'.format(glob))
+    print(sdf.shape)
+    mdf.to_csv(all_file, index=False)
+
+
+def prep_extracts(in_dir, out_dir, clamp_et=False, indirect=False):
+    ldata, years = [], list(range(1987, 2021))
+    years.reverse()
+
+    for yr in years:
         l = [os.path.join(in_dir, x) for x in os.listdir(in_dir) if x.endswith('{}.csv'.format(yr))]
         sdf, first = None, True
-        assert len(l) == 10
+
+        if not len(l) == 10:
+            print(yr, 'short')
+
         for c in l:
             df = pd.read_csv(c)
             et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
@@ -63,12 +110,17 @@ def prep_extracts(in_dir, out_dir, clamp_et=False):
                 df = df[df['season'] < df['ppt_wy_et'] * 0.001]
                 DROP.append('season')
 
+            ppt_wy_et = df['ppt_wy_et'] * 0.001
+            if indirect:
+                for etc in et_cols:
+                    df[etc] = df[etc].values.astype(float) * 0.00001 / ppt_wy_et
+
             df.dropna(inplace=True)
             try:
-                d = ['STUSPS', '.geo', 'system:index', 'id', 'uncult', 'cdl', 'nlcd']
+                d = ['.geo', 'system:index']
                 df.drop(columns=d, inplace=True)
             except KeyError:
-                d = ['.geo', 'system:index', 'STUSPS', 'id', 'season']
+                d = ['.geo', 'system:index', 'STUSPS', 'season']
                 df.drop(columns=d, inplace=True)
 
             if first:
@@ -236,19 +288,17 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    pts = os.path.join(root, 'shapefiles', 'points_29DEC2022')
-    ishp = os.path.join(pts, 'random_points.shp')
-    c = os.path.join(pts, 'sample_pts_29DEC2022.csv')
-    oshp = os.path.join(pts, 'sample_pts_29DEC2022.shp')
-    # join_csv_shapefile(ishp, c, oshp)
+    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'ietr_nonreclamation_24JAN2023')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_24JAN2023')
+    # hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
+    # merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
+    #                         glob='ietr_nonreclamation_24JAN2023', join_key='FID')
 
-    extracts = os.path.join(root, 'tables', 'band_extracts', 'bands_29DEC2022')
-    bands_out = os.path.join(root, 'tables', 'prepped_bands', 'bands_29DEC2022')
-    # prep_extracts(extracts, bands_out, clamp_et=True)
+    d = os.path.join(root, 'shapefiles', 'points_30JAN2023')
+    data = os.path.join(d, 'uncult_data')
+    oshp = os.path.join(d, 'uncult_pts_30JAN2023.shp')
+    ishp = os.path.join(d, 'random_points_buffEnv_stusps_30JAN2023.shp')
+    join_csv_shapefile(ishp, data, oshp, join_feat='id')
 
-    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'extracts_ietr_huc8_natet_9JAN2022')
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_huc8_natet_9JAN2022')
-    hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
-    merge_gridded_flow_data(basin_extracts, merged, flow_dir=None, glob='ietr_huc8_8JAN2023', join_key='huc8')
 
 # ========================= EOF ====================================================================

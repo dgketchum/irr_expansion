@@ -21,7 +21,7 @@ CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
 BOUNDARIES = 'users/dgketchum/boundaries'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
-BASIN_STATES = ['AZ', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
+BASIN_STATES = ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 PROPS = sorted(
     ['anm_ppt_gs', 'anm_ppt_lspr', 'anm_ppt_spr', 'anm_ppt_sum', 'anm_ppt_win', 'anm_ppt_wy', 'anm_ppt_wy_et',
@@ -29,7 +29,6 @@ PROPS = sorted(
      'anm_temp_wy', 'anm_temp_wy_et', 'anm_temp_wy_spr', 'aspect', 'awc', 'clay', 'cwd_gs', 'cwd_lspr', 'cwd_spr',
      'cwd_sum', 'cwd_win', 'cwd_wy', 'cwd_wy_et', 'cwd_wy_spr', 'elevation', 'etr_gs', 'etr_lspr', 'etr_spr',
      'etr_sum', 'etr_win', 'etr_wy', 'etr_wy_et', 'etr_wy_spr', 'ksat',
-     'lat', 'lon',
      'ppt_gs', 'ppt_lspr', 'ppt_spr', 'ppt_sum', 'ppt_win', 'ppt_wy', 'ppt_wy_et', 'ppt_wy_spr', 'sand', 'slope',
      'tmp_gs', 'tmp_lspr', 'tmp_spr', 'tmp_sum', 'tmp_win', 'tmp_wy', 'tmp_wy_et', 'tmp_wy_spr', 'tpi_1250',
      'tpi_150', 'tpi_250'])
@@ -40,33 +39,37 @@ SUBPROPS = ['aspect', 'elevation', 'slope']
 def get_uncultivated_points(tables, file_prefix):
     fc = ee.FeatureCollection(tables)
     irr_coll = ee.ImageCollection(RF_ASSET)
-    coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
-    remap = coll.map(lambda img: img.eq(2))
-    remap = remap.sum().rename('uncult')
-    nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').first().rename('nlcd')
-    cdl_cult, cdl_crop, cdl_simple = get_cdl(2020)
-    cdl_crop = cdl_crop.rename('cdl')
-    ned = ee.Image('USGS/NED')
-    coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
-    slope = ee.Terrain.products(ned).select('slope')
-    bands = remap.addBands([cdl_crop, nlcd, slope, coords])
 
-    plot_sample_regions = bands.sampleRegions(
-        collection=fc,
-        scale=30,
-        tileScale=16)
+    for st in BASIN_STATES:
+        coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
+        remap = coll.map(lambda img: img.eq(2))
+        remap = remap.sum().rename('uncult')
+        nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').first().rename('nlcd')
+        cdl_cult, cdl_crop, cdl_simple = get_cdl(2020)
+        cdl_crop = cdl_crop.rename('cdl')
+        ned = ee.Image('USGS/NED')
+        coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
+        slope = ee.Terrain.products(ned).select('slope')
+        bands = remap.addBands([cdl_crop, nlcd, slope, coords])
 
-    desc = '{}'.format(file_prefix)
-    task = ee.batch.Export.table.toCloudStorage(
-        plot_sample_regions,
-        description=desc,
-        selectors=['id', 'uncult', 'cdl', 'nlcd', 'slope'],
-        bucket='wudr',
-        fileNamePrefix='{}'.format(file_prefix),
-        fileFormat='CSV')
+        st_points = fc.filterMetadata('STUSPS', 'equals', st)
 
-    print(desc)
-    task.start()
+        plot_sample_regions = bands.sampleRegions(
+            collection=st_points,
+            scale=30,
+            tileScale=16)
+
+        desc = '{}_{}'.format(st, file_prefix)
+        task = ee.batch.Export.table.toCloudStorage(
+            plot_sample_regions,
+            description=desc,
+            selectors=['id', 'uncult', 'cdl', 'nlcd', 'slope'],
+            bucket='wudr',
+            fileNamePrefix=desc,
+            fileFormat='CSV')
+
+        print(desc)
+        task.start()
 
 
 def get_geomteries():
@@ -569,8 +572,8 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    pts = 'users/dgketchum/expansion/pts_29DEC2022'
-    # get_uncultivated_points(pts, 'sample_pts_29DEC2022')
+    pts = 'users/dgketchum/expansion/points/random_points_buffEnv_stusps_30JAN2023'
+    get_uncultivated_points(pts, 'random_points_30JAN2023')
 
     extract_loc = 'users/dgketchum/expansion/tables_29DEC2022/'
     ic = 'users/dgketchum/expansion/eff_ppt_indir'

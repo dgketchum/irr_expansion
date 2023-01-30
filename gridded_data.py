@@ -75,7 +75,7 @@ def export_gridded_data(tables, bucket, years, description, features=None,
     irr_min_yr_mask = remap.sum().gte(min_years)
 
     for yr in years:
-        for month in [8, 10]:
+        for month in range(1, 13):
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -187,14 +187,12 @@ def initialize():
 
 
 if __name__ == '__main__':
-    points = 'users/dgketchum/points/grid_5km_uinta'
     bucket = 'wudr'
-    basins = 'users/dgketchum/gages/gage_basins'
-    huc = 'users/dgketchum/boundaries/huc8_study'
+    table = 'users/dgketchum/expansion/nonreclamation'
+    export_gridded_data(table, bucket, list(range(1987, 2022)), 'ietr_nonreclamation_24JAN2023',
+                        min_years=5, debug=False, join_col='FID')
 
-    # extract_point_data(points, bucket, [2020], 'uinta', debug=
-
-    export_gridded_data(huc, bucket, [1993], 'ietr_huc8_8JAN2023',
-                        min_years=5, debug=False, join_col='huc8')
-
+    table = 'users/dgketchum/expansion/reclamation'
+    export_gridded_data(table, bucket, list(range(1987, 2022)), 'ietr_reclamation_24JAN2023',
+                        min_years=5, debug=False, join_col='FID')
 # ========================= EOF ================================================================================

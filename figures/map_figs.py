@@ -11,12 +11,16 @@ from gage_lists import EXCLUDE_STATIONS
 
 def basin_response(sensitivity_d, in_shape, glob=None, out_shape=None, basins=True, key='STAID'):
     feats = gpd.read_file(in_shape)
+
+    if 'FID' in feats.columns:
+        feats['FID'] = feats['FID'].map(lambda x: str(x).rjust(8, '0'))
+
     geo = {f[key]: shape(f['geometry']) for i, f in feats.iterrows()}
     areas = {f[key]: f['AREA'] for i, f in feats.iterrows()}
     if basins:
         names = {f[key]: f['STANAME'] for i, f in feats.iterrows()}
     else:
-        names = {f[key]: f['Name'] for i, f in feats.iterrows()}
+        names = {f[key]: f['NAME'] for i, f in feats.iterrows()}
 
     trends_dct = {}
 
@@ -70,7 +74,7 @@ def basin_response(sensitivity_d, in_shape, glob=None, out_shape=None, basins=Tr
             gdf['STANAME'] = [names[i] for i in gdf.index]
         _file = os.path.join(out_shape, '{}_{}.gpkg'.format(glob, m))
         gdf = gdf.fillna(0)
-        gdf.to_file(_file, driver='GPKG', crs='epsg:5071', geometry=geo)
+        gdf.to_file(_file, crs='epsg:5071', geometry=geo)
         print(_file)
 
 
@@ -79,16 +83,26 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
+    glob_ = 'nonusbr'
     basins = False
-    if basins:
-        glob_ = 'basin'
-        key_ = 'STAID'
-        inshp = os.path.join(root, 'gages', 'selected_gages.shp')
-    else:
-        glob_ = 'huc8'
-        key_ = 'huc8'
-        inshp = os.path.join(root, 'shapefiles', 'study_area_huc8.shp')
+    key_ = None
+    inshp = None
 
+    if glob_ == 'basin':
+        key_ = 'STAID'
+        basins = True
+        inshp = os.path.join(root, 'shapefiles/slected_gages_5071.shp')
+    elif glob_ == 'huc8':
+        key_ = 'huc8'
+        inshp = os.path.join(root, 'shapefiles', 'study_area_huc8_stripped.shp')
+    elif glob_ == 'nonusbr':
+        key_ = 'FID'
+        inshp = os.path.join(root, 'shapefiles/reclamation/irr_usbr_clipped_gt40sqkm_5071.shp')
+    elif glob_ == 'usbr':
+        key_ = 'FID'
+        inshp = os.path.join(root, 'shapefiles/reclamation/usbr_districts_north_5071_gt_1sqkm.shp')
+
+    # oshp_dir = os.path.join(root, 'figures', 'sensitivity_maps', 'shapefiles')
     oshp_dir = os.path.join('/home/dgketchum/Downloads', 'figures', 'sensitivity_maps')
     js_ = os.path.join(root, 'analysis', 'basin_sensitivities')
     basin_response(js_, inshp, glob=glob_, out_shape=oshp_dir, basins=basins, key=key_)

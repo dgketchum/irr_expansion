@@ -90,8 +90,10 @@ if __name__ == '__main__':
     root = '/media/research/IrrigationGIS/expansion'
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
-    figs = os.path.join(root, 'figures', 'heatmaps', 'basin')
+
+    space = 'usbr'
+    figs = os.path.join(root, 'figures', 'heatmaps', space)
     js_ = os.path.join(root, 'analysis', 'basin_sensitivities')
-    heatmap(js_, figs, param='r2', basins=True, desc_str='basin')
+    heatmap(js_, figs, param='b', basins=False, desc_str=space)
 
 # ========================= EOF ====================================================================

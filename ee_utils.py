@@ -19,7 +19,7 @@ def get_world_climate(months, param='prec'):
     if param == 'prec':
         i = i.sum()
     else:
-        i = i.mean()
+        i = i.mean().multiply(0.1)
     return i
 
 

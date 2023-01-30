@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+from pprint import pprint
 from copy import deepcopy
 from datetime import date
 
@@ -11,52 +13,23 @@ from geopandas import GeoDataFrame
 from shapely.geometry import Point
 
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
-
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 
-from tables import NLCD_UNCULT
-from call_ee import BASIN_STATES
+from call_ee import PROPS
+from hosted.hosted_conf import MODEL_DIR
 
 abspath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(abspath)
-
-PROPS = ['aspect', 'elevation', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
-
-
-def study_wide_accuracy(dir_, glob, year, seed=1234):
-    first = True
-    for st in BASIN_STATES:
-        ff = os.path.join(dir_, '{}_{}_{}.csv'.format(glob, st, year))
-        if os.path.exists(ff):
-            c = random_forest(ff, year=year, show_importance=False, clamp_et=True, out_shape=None, seed=seed)
-            if first:
-                df = deepcopy(c)
-                first = False
-            else:
-                df = pd.concat([df, c], axis=0, ignore_index=True)
-
-    et_cols = ['et_{}_{}'.format(2020, mm) for mm in range(4, 11)]
-    et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
-    pred_gs = df[et_pred].sum(axis=1)
-    label_gs = df[et_cols].sum(axis=1)
-    season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
-    print('========================   OVERALL   ==========================')
-    print('mean ET', label_gs.mean())
-    print('rmse ', season_rmse / label_gs.mean() * 100., '%')
-    print('rmse', season_rmse)
 
 
 class RandomForest:
 
     def __init__(self):
         self.rf = None
+        self.feature_importances = None
 
     def fit(self, x, y):
         self.rf = RandomForestRegressor(n_estimators=150,
@@ -65,36 +38,14 @@ class RandomForest:
                                         oob_score=True,
                                         min_samples_leaf=5)
         self.rf.fit(x, y)
+        self.feature_importances = self.rf.feature_importances_
 
     def predict(self, x):
         return self.rf.predict(x)
 
 
-class DNN:
-    def __init__(self, x):
-        self.normalizer = tf.keras.layers.Normalization(axis=-1)
-        self.normalizer.adapt(x)
-        self.dnn_model = self.build_and_compile_model()
-
-    def build_and_compile_model(self):
-        model = keras.Sequential([
-            self.normalizer,
-            layers.Dense(256, activation='relu'),
-            layers.Dense(256, activation='relu'),
-            layers.Dense(1)
-        ])
-        model.compile(loss='mean_absolute_error',
-                      optimizer=tf.keras.optimizers.Adam(0.001))
-        return model
-
-    def fit(self, x, y):
-        self.dnn_model.fit(x, y, verbose=0, epochs=200)
-
-    def predict(self, x_test):
-        return self.dnn_model.predict(x_test).flatten()
-
-
-def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=None, clamp_et=False):
+def model_data(csv, out_shape=None, year=2020, clamp_et=False, importance=None, glob=None,
+               n_feats=10):
     if not isinstance(csv, DataFrame):
         print('\n', csv)
         c = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
@@ -115,7 +66,7 @@ def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=No
     val_df = None
 
     targets, features, first = [], None, True
-    for m in range(4, 5):
+    for m in range(4, 11):
         df = deepcopy(c.loc[:split, :])
         mstr = str(m)
         target = 'et_{}_{}'.format(year, m)
@@ -138,14 +89,9 @@ def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=No
         val.drop(columns=et_cols, inplace=True)
         x_test = val.values
 
-        if model == 'random_forest':
-            rf = RandomForest()
-            rf.fit(x, y)
-            y_pred = rf.predict(x_test)
-        elif model == 'dnn':
-            nn = DNN(x)
-            nn.fit(x, y)
-            y_pred = nn.predict(x_test)
+        rf = RandomForest()
+        rf.fit(x, y)
+        y_pred = rf.predict(x_test)
 
         rmse = mean_squared_error(y_test, y_pred, squared=False)
         val_df['label_{}'.format(mstr)] = y_test
@@ -160,22 +106,35 @@ def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=No
         print('rmse ET: {:.3f} mm'.format(rmse * 1000))
         print('rmse {:.3f} %'.format(rmse / y.mean() * 100.))
 
-    # et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
-    # pred_gs = val_df[et_pred].sum(axis=1)
-    # label_gs = val_df[et_cols].sum(axis=1)
-    # season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
-    # print('\nmean predicted ET: {:.3f} m'.format(pred_gs.mean()))
-    # print('mean observed ET: {:.3f} m'.format(label_gs.mean()))
-    # print('mean difference ET: {:.3f} m'.format((pred_gs - label_gs).mean()))
-    # print('seasonal rmse ET: {:.3f} m'.format(season_rmse))
-    #
-    # print('predicted {} targets: '.format(len(targets)))
-    # print(targets, '\n')
-    # print('predicted on {} features: '.format(len(features)))
-    # print(features, '\n')
+        if importance:
+            vars = os.path.join(importance, 'variables_{}_{}.json'.format(glob, m))
+            with open(vars, 'r') as fp:
+                d = json.load(fp)
+            features = [f[0] for f in d[str(m)][:n_feats]]
+            x = df[features].values
+            x_test = val[features].values
+            rf = RandomForest()
+            rf.fit(x, y)
+            y_pred = rf.predict(x_test)
+            rmse = mean_squared_error(y_test, y_pred, squared=False)
+            print('sel observed ET: {:.3f} m'.format(y.mean()))
+            print('sel rmse ET: {:.3f} mm'.format(rmse * 1000))
+            print('sel rmse {:.3f} %'.format(rmse / y.mean() * 100.))
 
-    if out_fig:
-        plot_regressions(val_df, out_fig)
+    et_pred = ['pred_{}'.format(m) for m in range(4, 11)]
+    pred_gs = val_df[et_pred].sum(axis=1)
+    label_gs = val_df[et_cols].sum(axis=1)
+    season_rmse = mean_squared_error(label_gs, pred_gs, squared=False)
+    print('\nmean predicted ET: {:.3f} m'.format(pred_gs.mean()))
+    print('mean observed ET: {:.3f} m'.format(label_gs.mean()))
+    print('mean difference ET: {:.3f} m'.format((pred_gs - label_gs).mean()))
+    print('seasonal rmse ET: {:.3f} m'.format(season_rmse))
+
+    print('predicted {} targets: '.format(len(targets)))
+    print(targets, '\n')
+    print('predicted on {} features: '.format(len(features)))
+    print(features, '\n')
+
     if out_shape:
         gdf = GeoDataFrame(val_df, geometry=geo, crs='EPSG:4326')
         gdf.to_file(out_shape)
@@ -183,95 +142,127 @@ def model_data(csv, model='random_forest', out_shape=None, year=2020, out_fig=No
     return val_df
 
 
-def plot_regressions(df, outfig):
-    fig, ax = plt.subplots(2, 4, )
-    fig.set_figheight(10)
-    fig.set_figwidth(16)
-    lr = linregress(df['pred_gs'], df['label_gs'])
-    ax[0, 0].scatter(df['label_gs'], df['pred_gs'], s=15, marker='.', c='b')
-    ax[0, 0].title.set_text('Growing Season Apr - Oct')
-    ax[0, 0].set(xlabel='Observed EffPpt - Growing Season', ylabel='Predicted EffPpt - Growing Season')
-    txt = AnchoredText('n={}\nr={:.3f}\nb={:.3f}'.format(df.shape[0], lr.rvalue ** 2, lr.slope), loc=4)
-    ax[0, 0].add_artist(txt)
+def test_covariate_shift(csv_dir, inference_dir):
+    mdf = pd.DataFrame()
+    for year in range(2010, 2022):
+        train = os.path.join(csv_dir, 'bands_29DEC2022_{}.csv'.format(year))
+        inference = os.path.join(inference_dir, 'bands_irr_29DEC2022_{}.csv'.format(year))
+        df = read_csv(train, engine='python').sample(frac=1.0).reset_index(drop=True)
+        idf = read_csv(inference, engine='python', index_col='OPENET_ID').sample(frac=1.0)
+        idf_ppt = idf['ppt_wy_et'].values * 0.001
+        df_ppt = df['ppt_wy_et'].values * 0.001
+        et_cols = ['et_{}_{}'.format(year, mm) for mm in range(4, 11)]
 
-    months = list(range(4, 11))
-    cols = [('label_{}'.format(m), 'pred_{}'.format(m)) for m in range(4, 11)]
-    for e, ax_ in enumerate(ax.ravel()[1:]):
-        p, l = df[cols[e][1]] * 0.00001, df[cols[e][0]] * 0.00001
-        lr = linregress(p, l)
-        mstr = date.strftime(date(1990, months[e], 1), '%B')
-        ax_.scatter(l, p, s=15, marker='.', c='b')
-        ax_.title.set_text('Effective Precipitation {} [m]'.format(mstr))
-        ax_.set(xlabel='Observed EffPpt - {}'.format(mstr), ylabel='Predicted EffPpt - {}'.format(mstr))
-        txt = AnchoredText('n={}\nr={:.3f}\nb={:.3f}'.format(df.shape[0], lr.rvalue ** 2, lr.slope), loc=4)
-        ax_.add_artist(txt)
+        labels, _dirs, _indirs = [], [], []
+        for etc in et_cols:
+            df[etc] = df[etc].values.astype(float) * 0.00001
+            idf[etc] = idf[etc].values.astype(float) * 0.00001
 
-    plt.tight_layout()
-    plt.savefig(outfig)
+        df['season'] = df[et_cols].sum(axis=1)
+        print(df.shape)
+        df = df[df['season'] < df['ppt_wy_et'] * 0.001]
+        df.drop(columns=['season'], inplace=True)
+        targets, features, first = [], None, True
+
+        for m in range(4, 11):
+            mstr = str(m)
+
+            if first:
+                geo = idf.apply(lambda x: Point(x['lon'], x['lat']), axis=1)
+                val_df = GeoDataFrame(index=idf.index, geometry=geo)
+                if mdf.empty:
+                    mdf = GeoDataFrame(index=idf.index, geometry=geo)
+                first = False
+
+            target = 'et_{}_{}'.format(year, m)
+            df.dropna(axis=0, inplace=True)
+            y = df[target].values
+            x = df[PROPS].values
+            targets.append(target)
+            rf = RandomForest()
+            rf.fit(x, y)
+
+            # preict ET directly, estimate ppt:ept
+            irr_label = idf[target].values
+            irr_x = idf[PROPS].values
+            irr_test_direct = rf.predict(irr_x)
+
+            # preict ET indirectly, model ppt:ept
+            rf = RandomForest()
+            y = df[target] / df_ppt
+            rf.fit(x, y)
+            irr_test_indirect = rf.predict(irr_x)
+
+            labels.append('label_{}'.format(mstr))
+            _dirs.append('dir_{}'.format(mstr))
+            _indirs.append('indir_{}'.format(mstr))
+            val_df[labels[-1]] = irr_label / idf_ppt
+            val_df[_dirs[-1]] = irr_test_direct / idf_ppt
+            val_df[_indirs[-1]] = irr_test_indirect
+            print('{} label: {:.3f}, dir: {:.3f}, indir: {:.3f}'.format(m, val_df[labels[-1]].mean(),
+                                                                        val_df[_dirs[-1]].mean(),
+                                                                        val_df[_indirs[-1]].mean()))
+
+        mdf.loc[val_df.index, 'geometry'] = geo
+        mdf.loc[val_df.index, 'label_{}'.format(year)] = val_df[labels].sum(axis=1)
+        mdf.loc[val_df.index, 'dir_{}'.format(year)] = val_df[_dirs].sum(axis=1)
+        mdf.loc[val_df.index, 'indir_{}'.format(year)] = val_df[_indirs].sum(axis=1)
+
+    gdf = GeoDataFrame(val_df, geometry=geo, crs='EPSG:4326')
+    _file = os.path.join(inference_dir, 'infer_irr_29DEC2022.shp')
+    gdf.to_file(_file)
 
 
-def write_histograms(csv, fig_dir):
-    if not isinstance(csv, DataFrame):
-        print('\n', csv)
-        df = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
-    else:
-        df = csv
+def find_rf_variable_importance(csv_dir, glob=None, importance_json=None):
+    years_ = [x for x in range(2000, 2021)]
+    years_.reverse()
 
-    yr = int(os.path.basename(csv).split('.')[0][-4:])
-    df['ppt'] = df[['ppt_{}_{}'.format(yr, m) for m in range(1, 10)] +
-                   ['ppt_{}_{}'.format(yr - 1, m) for m in range(10, 13)]].sum(axis=1)
-    df['etr'] = df[['etr_{}_{}'.format(yr, m) for m in range(1, 10)] +
-                   ['etr_{}_{}'.format(yr - 1, m) for m in range(10, 13)]].sum(axis=1)
-    et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
-    df['season'] = df[et_cols].sum(axis=1) * 0.00001
+    for i, m in enumerate(range(4, 6)):
+        print('\nmonth {}'.format(m))
+        master, first = {}, True
+        for year in years_:
+            print(year)
+            csv = os.path.join(csv_dir, '{}_{}.csv'.format(glob, year))
+            df = read_csv(csv, engine='python').sample(frac=1.0).reset_index(drop=True)
+            et_cols = ['et_{}_{}'.format(year, mm) for mm in range(4, 11)]
+            for etc in et_cols:
+                df[etc] = df[etc].values.astype(float) * 0.00001
+            for iter_ in range(2):
+                d, _, l, _ = train_test_split(df[PROPS].values, df[et_cols[i]].values, train_size=0.67)
+                print('model iteration {}'.format(iter_))
+                rf = RandomForest()
+                rf.fit(d, l)
+                _list = [(f, v) for f, v in zip(PROPS, rf.feature_importances)]
+                imp = sorted(_list, key=lambda x: x[1], reverse=True)
+                print([f[0] for f in imp[:10]])
 
-    print(df.shape)
+                if first:
+                    for (k, v) in imp:
+                        master[k] = v
+                    first = False
+                else:
+                    for (k, v) in imp:
+                        master[k] += v
 
-    try:
-        alt = ['STUSPS', 'uncult']
-        df.drop(columns=alt, inplace=True)
-    except KeyError:
-        alt = ['uncult']
-        df.drop(columns=alt, inplace=True)
-
-    df['nlcd_class'] = df['nlcd'].apply(lambda x: True if x in NLCD_UNCULT else False)
-    df = df[df['nlcd_class']]
-    df.drop(columns=['.geo', 'system:index', 'id'], inplace=True)
-
-    cols = list(df.columns)
-    for col in cols:
-        arr = df[col].values
-        if isinstance(arr[0], float):
-            bins = 20
-        else:
-            continue
-        frq, edges = np.histogram(arr, bins)
-        plt.bar(edges[:-1], frq, width=np.diff(edges), edgecolor="black", align="edge")
-        plt.title(col)
-        _figfile = os.path.join(fig_dir, '{}.png'.format(col))
-        plt.savefig(_figfile)
-        plt.close()
-        print(col)
-
-
-def plot_loss(history):
-    plt.plot(history.history['loss'], label='loss')
-    plt.plot(history.history['val_loss'], label='val_loss')
-    plt.ylim([0, 10])
-    plt.xlabel('Epoch')
-    plt.ylabel('Error [MPG]')
-    plt.legend()
-    plt.grid(True)
+        master = list(master.items())
+        master = sorted(master, key=lambda x: x[1], reverse=True)
+        d = {m: master}
+        jsn = os.path.join(importance_json, 'variables_{}_{}.json'.format(glob, m))
+        with open(jsn, 'w') as fp:
+            fp.write(json.dumps(d, indent=4, sort_keys=True))
 
 
 if __name__ == '__main__':
-    home = os.path.expanduser('~')
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    prepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    study_area = os.path.join(prepped, 'bands_29DEC2022_2020.csv')
-    # model_data(study_area, 'random_forest', clamp_et=True)
-    model_data(study_area, 'dnn', clamp_et=False)
+    tprepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
+    iprepped = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_irr_29DEC2022')
+    # test_covariate_shift(tprepped, iprepped)
+
+    imp_js = os.path.join(root, 'expansion', 'analysis', 'importance')
+    # find_rf_variable_importance(prepped, glob='bands_29DEC2022', importance_json=imp_js)
+
+    # model_data(tprepped, importance=imp_js, glob='bands_29DEC2022', n_feats=20)
 # ========================= EOF ====================================================================

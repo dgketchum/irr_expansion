@@ -16,6 +16,18 @@ EE = os.path.join(conda, 'irrimp', 'bin', 'earthengine')
 GS = '/home/dgketchum/google-cloud-sdk/bin/gsutil'
 
 
+def list_bucket_files(location):
+    command = 'ls'
+    cmd = ['{}'.format(GS), '{}'.format(command), '{}'.format(location)]
+    asset_list = Popen(cmd, stdout=PIPE)
+    stdout, stderr = asset_list.communicate()
+    reader = csv.DictReader(stdout.decode('ascii').splitlines(),
+                            delimiter=' ', skipinitialspace=True,
+                            fieldnames=['name'])
+    assets = [x['name'] for x in reader]
+    return assets
+
+
 def list_assets(location):
     command = 'ls'
     cmd = ['{}'.format(EE), '{}'.format(command), '{}'.format(location)]

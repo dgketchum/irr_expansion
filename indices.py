@@ -93,7 +93,7 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                                                calibration_year_final=2021,
                                                periodicity=compute.Periodicity.monthly)
 
-            if plot_dir:
+            if plot_dir and basins:
                 for met_param in ['SPI_12', 'SPEI_12']:
                     use_timescale = 2
                     fig_file = os.path.join(plot_dir, '{}_{}.png'.format(sid, met_param))
@@ -139,11 +139,16 @@ if __name__ == '__main__':
     merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_huc8_natet_9JAN2022')
     data_ = os.path.join(root, 'gages', 'huc8_metadata.json')
     figs = os.path.join(root, 'figures', 'panel')
-    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
     # write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='huc8')
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_nater_8JAN2022')
-    data_ = os.path.join(root, 'gages', 'irrigated_gage_metadata.json')
-    write_indices(data_, merged, out_js, plot_dir=None, basins=True, desc_str='basin')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_reclamation_24JAN2023')
+    data_ = os.path.join(root, 'gages', 'usbr_metadata_north.json')
+    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
+    write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='usbr')
+
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_24JAN2023')
+    data_ = os.path.join(root, 'gages', 'nonreclamation_metadata_north.json')
+    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
+    write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='nonusbr')
 
 # ========================= EOF ====================================================================
