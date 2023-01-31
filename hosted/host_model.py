@@ -1,7 +1,8 @@
 import os
 import json
 import time
-from subprocess import check_call, CalledProcessError
+from subprocess import CalledProcessError
+from subprocess import Popen, PIPE, check_call
 from calendar import monthrange
 from datetime import date
 
@@ -28,6 +29,7 @@ conda = os.path.join(home, 'miniconda3', 'envs')
 if not os.path.exists(conda):
     conda = conda.replace('miniconda3', 'miniconda')
 EE = os.path.join(conda, 'irrimp', 'bin', 'earthengine')
+RINFO = os.path.join(conda, 'irrimp', 'bin', 'rio')
 GS = '/home/dgketchum/google-cloud-sdk/bin/gsutil'
 GCLOUD = '/home/dgketchum/google-cloud-sdk/bin/gcloud'
 
@@ -38,7 +40,7 @@ MODEL_NAME = 'ept_model_{}'
 DATA_BUCKET = 'wudr'
 OUTPUT_BUCKET = 'wudr'
 REGION = 'us-central1'
-MODEL_DIR = 'gs://wudr/ept_model'
+MODEL_DIR = '/media/nvm/ept/ept_models'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
 VERSION_SCALE = 1000
 
@@ -53,6 +55,7 @@ class DNN:
         :param label: String target
         :param _dir: GCS Bucket where the model is heading
         '''
+        self.unordered_index = None
         self.indices = None
         self.normalizer = None
         self.model_dir = _dir
@@ -279,38 +282,53 @@ class DNN:
         task.start()
         print(asset_id, target_str)
 
-    def infer_local(self, raster, out_raster):
+    def infer_local(self, in_rasters, out_rasters):
 
-        band_order = ['aspect', 'elevation', 'slope', 'ppt_wy_et', 'etr_gs', 'ppt_gs']
-        unord_ind = [band_order.index(p) for p in self.feature_names]
+        rasters = [os.path.join(in_rasters, x) for x in os.listdir(in_rasters)]
 
-        def parse_image(img_path):
-            img_path = img_path.numpy().decode('utf-8')
-            with rasterio.open(img_path) as src:
-                img = src.read()
-                img = img[unord_ind, :, :]
-                img = np.moveaxis(img, 0, 2)
-            return img
+        p = Popen([RINFO, 'info', rasters[0]], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        out = p.communicate()
+        s = out[0].decode('ascii').splitlines()
+        raster_info = json.loads(s[0])
 
-        with rasterio.open(raster) as src:
+        self.unordered_index = [raster_info['descriptions'].index(p) for p in self.feature_names]
+
+        for r in rasters:
+            base = os.path.basename(r)
+            out_raster_file = os.path.join(out_rasters, base.replace('.', '_{}.'.format(self.label)))
+            self._write_inference(r, out_raster_file)
+
+    def _parse_image(self, img):
+        img = img[self.unordered_index, :, :]
+        img = np.moveaxis(img, 0, 2)
+        img = img.reshape((img.shape[0] * img.shape[1], img.shape[-1]))
+        img = img[:, np.newaxis, np.newaxis, :]
+        return img
+
+    def _write_inference(self, inras, outras):
+
+        with rasterio.open(inras, 'r') as src:
             meta = src.meta
-
-        ds = tf.data.Dataset.from_tensor_slices([raster])
-        ds = ds.map(lambda x: tf.py_function(parse_image, [x], [tf.float32])).batch(256)
-
-        result = self.model.predict(ds)
-        result = result.reshape((1, meta['height'], meta['width']))
-        meta['count'] = 1
-        with rasterio.open(out_raster, 'w', **meta) as dst:
-            dst.write(result)
-        pass
+            meta['count'] = 1
+            with rasterio.open(outras, 'w', **meta) as dst:
+                for block_index, window in src.block_windows(1):
+                    block_array = src.read(window=window)
+                    shp = (1, block_array.shape[1], block_array.shape[2])
+                    if not np.all(np.isnan(block_array)):
+                        ds = self._parse_image(block_array)
+                        ds = tf.data.Dataset.from_tensor_slices([ds])
+                        result = self.model.predict(ds, verbose=0).reshape(shp)
+                        result = np.where(np.isnan(result), np.ones_like(result) - 2, result)
+                    else:
+                        result = np.zeros_like(block_array)[:1, :, :] - 1
+                    dst.write(result, window=window)
+        print(outras)
 
     def load(self):
         self.model = tf.keras.models.load_model(self.model_dir)
 
 
 def remove_models(model_name, gc_project_id):
-
     project_id = 'projects/{}'.format(gc_project_id)
     model_id = '{}/models/{}'.format(project_id, model_name)
 
@@ -396,7 +414,32 @@ def request_band_extract(file_prefix, points_layer, region, years, clamp_et=Fals
             print(desc)
 
 
+def export_inference_rasters():
+    ee.Initialize()
+    roi = ee.FeatureCollection('users/dgketchum/study_area_klamath')
+    geo = roi.geometry()
+    props = sorted(['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et'])
+
+    for yr in range(2021, 2022):
+        scale_feats = {'climate': 0.001, 'soil': 0.01, 'terrain': 0.001}
+        stack = stack_bands(yr, roi, VERSION_SCALE, **scale_feats)
+        stack = stack.select(props)
+
+        desc = 'ept_image_full_stack_{}'.format(yr)
+        task = ee.batch.Export.image.toCloudStorage(
+            image=stack,
+            description=desc,
+            bucket='wudr',
+            fileNamePrefix=desc,
+            scale=1000,
+            region=geo)
+
+        task.start()
+        print(desc)
+
+
 if __name__ == '__main__':
+
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
@@ -414,15 +457,18 @@ if __name__ == '__main__':
         model_dir = os.path.join(MODEL_DIR, t)
         nn = DNN(month=m, label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
-        nn.train(2560, '/media/nvm/tfr/')
-        # nn.save()
-        # nn.deploy()
-        # nn.infer_ee(asset_rt, clip, 2019, m, PROPS)
+        nn.train(2560, '/media/nvm/ept/tfr'.format(t))
+        nn.save()
+        # nn.load()
+        nn.infer_local('/media/nvm/ept/small_stack',
+                       '/media/nvm/ept/small_stack_pred')
 
     points_ = 'users/dgketchum/expansion/points/pts_30JAN2023'
     bucket = 'wudr'
     years_ = [x for x in range(1987, 2022)]
     clip = 'users/dgketchum/expansion/study_area_dissolve'
     # request_band_extract('bands_30JAN2023', points_, clip, years_, clamp_et=True)
+
+    # export_inference_rasters()
 
 # ========================= EOF ====================================================================
