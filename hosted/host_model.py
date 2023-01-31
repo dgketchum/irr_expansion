@@ -414,29 +414,10 @@ if __name__ == '__main__':
         model_dir = os.path.join(MODEL_DIR, t)
         nn = DNN(month=m, label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
-        # nn.train(2560, '/media/nvm/tfr/')
+        nn.train(2560, '/media/nvm/tfr/')
         # nn.save()
         # nn.deploy()
-        # nn.infer_ee(asset_rt, clip, 2020, m, PROPS)
-        remove_models(nn.model_name, 'ssebop-montana')
-
-    # VERSION_NAME = 'v01'
-    # from call_ee import PROPS
-    #
-    # for m in range(4, 11):
-    #     t = 'et_{}'.format(m)
-    #     model_dir = os.path.join(MODEL_DIR, t)
-    #     nn = DNN(month=m, label=t, _dir=model_dir)
-    #     nn.model_name = MODEL_NAME.format(m)
-    #     nn.train(2560, '/media/nvm/tfr/')
-    #     nn.save()
-    #     nn.deploy()
-    #     nn.infer_ee(asset_rt, clip, 2019, m, PROPS)
-
-    # nn.load()
-    # nn.tfrecord_vs_raster()
-    # nn.infer_local(raster='/home/dgketchum/Downloads/ept_30m_6_bands.tif',
-    #                out_raster='/home/dgketchum/Downloads/ept_pred_30m.tif')
+        # nn.infer_ee(asset_rt, clip, 2019, m, PROPS)
 
     points_ = 'users/dgketchum/expansion/points/pts_30JAN2023'
     bucket = 'wudr'
