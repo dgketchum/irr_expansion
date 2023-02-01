@@ -75,6 +75,7 @@ class DNN:
     def prepare(self, n_inputs):
         model = tf.keras.models.Sequential([
             tf.keras.layers.Input((None, None, n_inputs,)),
+            tf.keras.layers.BatchNormalization(),
             tf.keras.layers.Conv2D(64, (1, 1), activation=tf.nn.relu),
             tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dropout(0.2),
@@ -106,9 +107,28 @@ class DNN:
         feats = tf.expand_dims(tf.transpose(list(inputs.values())), 1)
         return feats, lb1
 
-    def train(self, batch, data_dir, save_test_data=None):
+    def check_data(self, batch, data_dir):
 
         training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
+        dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
+        parsed_training = dataset.map(self.parse_tfrecord, num_parallel_calls=5)
+
+        input_dataset = parsed_training.map(self.to_tuple)
+        input_dataset = input_dataset.shuffle(1000).batch(batch)
+        records_ct = 0
+        for e, (i, s) in enumerate(input_dataset):
+            records_ct += i.shape[0]
+            i = np.array(i)
+            s = np.array(s)
+            if e % 1000 == 0:
+                print('{}, {:.3f}, {}, {}'.format(np.mean(i, axis=0).flatten(), np.mean(s),
+                                                  np.count_nonzero(np.isnan(i)),
+                                                  np.count_nonzero(np.isnan(s))))
+        print('{} records'.format(records_ct))
+
+    def train(self, batch, data_dir, save_test_data=None):
+
+        training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir) if 'WA' in p]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
         split = 5
@@ -127,9 +147,9 @@ class DNN:
 
         self.prepare(len(self.feature_names))
 
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, min_lr=0.001, cooldown=3)
-        early_stopping = EarlyStopping(monitor='val_loss', patience=10, mode='auto', restore_best_weights=True)
-        self.model.fit(x=input_dataset, verbose=1, epochs=1000, validation_data=input_test,
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=2, min_lr=0.001, cooldown=3)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=5, mode='auto', restore_best_weights=True)
+        self.model.fit(x=input_dataset, verbose=1, epochs=10, validation_data=input_test,
                        validation_freq=1, callbacks=[reduce_lr, early_stopping])
 
         y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
@@ -285,11 +305,13 @@ class DNN:
     def infer_local(self, in_rasters, out_rasters):
 
         rasters = [os.path.join(in_rasters, x) for x in os.listdir(in_rasters)]
+        rasters = sorted(rasters)
+        rasters.reverse()
 
         p = Popen([RINFO, 'info', rasters[0]], stdin=PIPE, stdout=PIPE, stderr=PIPE)
         out = p.communicate()
-        s = out[0].decode('ascii').splitlines()
-        raster_info = json.loads(s[0])
+        raster_info = out[0].decode('ascii').splitlines()
+        raster_info = json.loads(raster_info[0])
 
         self.unordered_index = [raster_info['descriptions'].index(p) for p in self.feature_names]
 
@@ -321,6 +343,7 @@ class DNN:
                         result = np.where(np.isnan(result), np.ones_like(result) - 2, result)
                     else:
                         result = np.zeros_like(block_array)[:1, :, :] - 1
+                    print(np.nanmedian(result), np.nanstd(result))
                     dst.write(result, window=window)
         print(outras)
 
