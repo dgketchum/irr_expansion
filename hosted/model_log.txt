@@ -1,0 +1,62 @@
+target et_4
+observed ET: 0.024 mm
+predicted ET mean: 0.022 mm
+predicted ET min: 0.001 mm
+predicted ET max: 0.083 mm
+predicted ET std: 0.021 mm
+rmse ET: 0.018 mm
+rmse 74.296 %
+
+target et_5
+observed ET: 0.043 mm
+predicted ET mean: 0.042 mm
+predicted ET min: 0.005 mm
+predicted ET max: 0.117 mm
+predicted ET std: 0.023 mm
+rmse ET: 0.022 mm
+rmse 50.097 %
+
+target et_6
+observed ET: 0.052 mm
+predicted ET mean: 0.048 mm
+predicted ET min: 0.008 mm
+predicted ET max: 0.135 mm
+predicted ET std: 0.032 mm
+rmse ET: 0.023 mm
+rmse 44.492 %
+
+target et_7
+observed ET: 0.047 mm
+predicted ET mean: 0.041 mm
+predicted ET min: 0.003 mm
+predicted ET max: 0.180 mm
+predicted ET std: 0.034 mm
+rmse ET: 0.025 mm
+rmse 53.110 %
+
+target et_8
+observed ET: 0.035 mm
+predicted ET mean: 0.025 mm
+predicted ET min: -0.002 mm
+predicted ET max: 0.166 mm
+predicted ET std: 0.030 mm
+rmse ET: 0.024 mm
+rmse 67.323 %
+
+target et_9
+observed ET: 0.027 mm
+predicted ET mean: 0.023 mm
+predicted ET min: 0.005 mm
+predicted ET max: 0.098 mm
+predicted ET std: 0.018 mm
+rmse ET: 0.017 mm
+rmse 64.456 %
+
+target et_10
+observed ET: 0.021 mm
+predicted ET mean: 0.014 mm
+predicted ET min: 0.010 mm
+predicted ET max: 0.042 mm
+predicted ET std: 0.007 mm
+rmse ET: 0.016 mm
+rmse 76.066 %
