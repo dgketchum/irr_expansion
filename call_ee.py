@@ -84,162 +84,6 @@ def get_geomteries():
     return uinta, test_point
 
 
-def export_pixels(roi, clip, years, shardfile):
-    gdf = gpd.read_file(shardfile)
-    point_fids = list(gdf['id'].values)
-
-    points_fc = ee.FeatureCollection('users/dgketchum/grids/shard_wa_18JAN2023')
-
-    roi = ee.FeatureCollection(roi)
-    clip = ee.FeatureCollection(clip).geometry()
-
-    for yr in years:
-        et_cols = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)]
-        stack = stack_bands(yr, roi).select(SUBPROPS)
-        stack = stack.clip(clip)
-
-        mask = ee.Image().byte()
-        mask = mask.paint(roi, 1)
-
-        stack = stack.addBands(mask.rename('roi'))
-
-        ct = 0
-        geometry_sample = ee.ImageCollection([])
-        first = True
-        for i in range(100, len(point_fids), 5):
-            for j in range(i, i + 5):
-                try:
-                    loc = int(point_fids[j])
-                    if first:
-                        print(loc)
-                        first = False
-                    out_filename = '{}_{}'.format(str(yr), loc)
-                    point = points_fc.filter(ee.Filter.eq('id', int(loc)))
-                    sample = stack.sample(
-                        region=point.geometry(),
-                        scale=1000,
-                        tileScale=16,
-                        dropNulls=True)
-                    geometry_sample = geometry_sample.merge(sample)
-                    ct += 1
-                except IndexError:
-                    break
-
-        task = ee.batch.Export.table.toCloudStorage(
-            collection=geometry_sample,
-            bucket='wudr',
-            description=out_filename,
-            fileNamePrefix=out_filename,
-            fileFormat='TFRecord',
-            selectors=PROPS + et_cols)
-        task.start()
-        exit()
-
-
-def export_classification(extracts, asset_root, region, years, bag_fraction=0.5, min_irr_years=5,
-                          irr_mask=True, gridmet_res=False, indirect=False, glob='bands'):
-    irr_coll = ee.ImageCollection(RF_ASSET)
-    coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
-    remap = coll.map(lambda img: img.lt(1))
-    irr_min_yr_mask = remap.sum().gte(min_irr_years)
-    proj = ee.Projection('EPSG:5071').getInfo()
-
-    for yr in years:
-        targets, input_props = ['et_{}_{}'.format(yr, mm) for mm in range(4, 11)], PROPS
-        roi = ee.FeatureCollection(region)
-        input_bands = stack_bands(yr, roi, gridmet_res=gridmet_res)
-
-        if not gridmet_res:
-            input_bands = input_bands.reproject(crs=proj['crs'], scale=30)
-
-        for target, month in zip(targets, range(4, 11)):
-            cols = input_props + [target]
-            table_ = os.path.join(extracts, 'bands_29DEC2022_{}'.format(yr))
-            fc = ee.FeatureCollection(table_)
-            fc = fc.filter(ee.Filter.eq('STUSPS', 'WA'))
-            elem = fc.first().getInfo()
-            fc = fc.select(cols)
-
-            classifier = ee.Classifier.smileRandomForest(
-                numberOfTrees=150,
-                bagFraction=bag_fraction).setOutputMode('REGRESSION')
-
-            trained_model = classifier.train(fc, target, input_props)
-
-            image_stack = input_bands.select(input_props)
-
-            desc = 'eff_ppt_{}_{}'.format(yr, month)
-
-            classified_img = image_stack.unmask().classify(trained_model).float().set({
-                'system:index': ee.Date('{}-{}-01'.format(yr, month)).format('YYYYMMdd'),
-                'system:time_start': ee.Date('{}-{}-01'.format(yr, month)).millis(),
-                'system:time_end': ee.Date('{}-{}-{}'.format(yr, month, monthrange(yr, month)[1])).millis(),
-                'date_ingested': str(date.today()),
-                'image_name': desc,
-                'training_data': extracts,
-                'bag_fraction': bag_fraction,
-                'target': target})
-
-            if irr_mask:
-                irr = irr_coll.filterDate('{}-01-01'.format(yr),
-                                          '{}-12-31'.format(yr)).select('classification').mosaic()
-                irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
-                classified_img = classified_img.mask(irr_mask)
-
-            if indirect:
-                classified_img = classified_img.multiply(input_bands.select('ppt_wy_et').multiply(0.001))
-
-            classified_img = classified_img.rename('eff_ppt')
-            classified_img = classified_img.clip(roi.geometry())
-
-            asset_id = os.path.join(asset_root, desc)
-
-            task = ee.batch.Export.image.toAsset(
-                image=classified_img,
-                description=desc,
-                assetId=asset_id,
-                pyramidingPolicy={'.default': 'mean'},
-                maxPixels=1e13)
-
-            task.start()
-            print(asset_id, target)
-
-
-def request_band_extract(file_prefix, points_layer, region, years, scale=1000):
-    roi = ee.FeatureCollection(region)
-    points = ee.FeatureCollection(points_layer)
-    for yr in years:
-        for st in BASIN_STATES:
-            if st != 'WA':
-                continue
-            stack = stack_bands(yr, roi, scale)
-
-            state_bound = ee.FeatureCollection(os.path.join(BOUNDARIES, st))
-            stack = stack.clip(state_bound)
-
-            st_points = points.filterMetadata('STUSPS', 'equals', st)
-
-            # geo = ee.FeatureCollection(ee.Geometry.Point(-120.4404, 47.0072))
-
-            plot_sample_regions = stack.sampleRegions(
-                collection=st_points,
-                scale=scale,
-                tileScale=16)
-
-            # point = plot_sample_regions.first().getInfo()
-
-            desc = '{}_{}_{}'.format(file_prefix, st, yr)
-            task = ee.batch.Export.table.toCloudStorage(
-                plot_sample_regions,
-                description=desc,
-                bucket='wudr',
-                fileNamePrefix=desc,
-                fileFormat='TFRecord')
-
-            task.start()
-            print(desc)
-
-
 def stack_bands(yr, roi, resolution, **scale_factors):
     """
     Create a stack of bands for the year and region of interest specified.
@@ -312,7 +156,7 @@ def stack_bands(yr, roi, resolution, **scale_factors):
     sand = ee.Image('users/dgketchum/soils/ssurgo_Sand_WTA_0to152cm_composite')
     sand = sand.multiply(scale_factors['soil']).rename('sand')
 
-    et = irr_et_data(yr, resolution)
+    et = irr_et_data(yr)
 
     season = et.reduce(ee.Reducer.sum()).rename('et_gs')
     ratio = season.divide(input_bands.select('ppt_wy_et')).rename('ratio')
@@ -325,7 +169,7 @@ def stack_bands(yr, roi, resolution, **scale_factors):
     return input_bands
 
 
-def irr_et_data(yr, scale):
+def irr_et_data(yr):
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
@@ -354,13 +198,6 @@ def irr_et_data(yr, scale):
         names.append('et_{}'.format(month))
         et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
         et = et_sum.multiply(0.00001)
-
-        # TODO make this an optional argument
-        # proj = ee.Projection('EPSG:4326').getInfo()
-        # crs = proj['crs']
-        # et = et.setDefaultProjection(proj)
-        # et = et.reproject(crs=crs, scale=scale)
-        # et = et.reduceResolution(reducer=ee.Reducer.mean(), bestEffort=True)
 
         if month == 4:
             bands = et
@@ -453,45 +290,44 @@ def extract_point_data(tables, bucket, years, description, debug=False):
         print(out_desc)
 
 
-def extract_ndvi_change(tables, bucket, features=None):
-    fc = ee.FeatureCollection(tables)
-    if features:
-        fc = fc.filter(ee.Filter.inList('STAID', features))
+def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_et=False):
+    ee.Initialize()
+    roi = ee.FeatureCollection(region)
+    points = ee.FeatureCollection(points_layer)
 
-    roi = get_geomteries()[-1]
-    early = landsat_masked(1987, 1991, 182, 243, roi)
-    late = landsat_masked(2017, 2021, 182, 243, roi)
-    early_mean = ee.Image(early.map(lambda x: x.normalizedDifference(['B5', 'B4'])).median())
-    late_mean = ee.Image(late.map(lambda x: x.normalizedDifference(['B5', 'B4'])).median())
-    ndvi_diff = late_mean.subtract(early_mean).rename('nd_diff')
+    for st in BASIN_STATES:
+        for yr in years:
 
-    dataset = ee.ImageCollection('USDA/NASS/CDL').filter(ee.Filter.date('2013-01-01', '2017-12-31'))
-    cultivated = dataset.select('cultivated').mode()
+            scale_feats = {'climate': 0.001, 'soil': 0.01, 'terrain': 0.001}
+            stack = stack_bands(yr, roi, scale, **scale_feats)
 
-    ndvi_cult = ndvi_diff.mask(cultivated.eq(2))
-    increase = ndvi_cult.gt(0.2).rename('gain')
-    decrease = ndvi_cult.lt(-0.2).rename('loss')
-    change = increase.addBands([decrease])
-    change = change.mask(cultivated)
-    change = change.multiply(ee.Image.pixelArea())
+            state_bound = ee.FeatureCollection(os.path.join(BOUNDARIES, st))
+            stack = stack.clip(state_bound)
+            st_points = points.filterMetadata('STUSPS', 'equals', st)
 
-    fc = fc.filterMetadata('STAID', 'equals', '13269000')
+            # st_points = ee.FeatureCollection(ee.Geometry.Point(-120.260594, 46.743666))
 
-    change = change.reduceRegions(collection=fc,
-                                  reducer=ee.Reducer.sum(),
-                                  scale=30)
-    p = change.first().getInfo()
-    out_desc = 'ndvi_change'
-    selectors = ['STAID', 'loss', 'gain']
-    task = ee.batch.Export.table.toCloudStorage(
-        change,
-        description=out_desc,
-        bucket=bucket,
-        fileNamePrefix=out_desc,
-        fileFormat='CSV',
-        selectors=selectors)
-    task.start()
-    print(out_desc)
+            plot_sample_regions = stack.sampleRegions(
+                collection=st_points,
+                scale=scale,
+                tileScale=16,
+                projection=ee.Projection('EPSG:4326'))
+
+            if clamp_et:
+                plot_sample_regions = plot_sample_regions.filter(ee.Filter.lt('ratio', ee.Number(1.0)))
+
+            # point = plot_sample_regions.first().getInfo()
+
+            desc = '{}_{}_{}'.format(file_prefix, st, yr)
+            task = ee.batch.Export.table.toCloudStorage(
+                plot_sample_regions,
+                description=desc,
+                bucket='wudr',
+                fileNamePrefix=desc,
+                fileFormat='TFRecord')
+
+            task.start()
+            print(desc)
 
 
 def landsat_c2_sr(input_img):
@@ -572,15 +408,13 @@ def is_authorized():
 if __name__ == '__main__':
     is_authorized()
 
-    pts = 'users/dgketchum/expansion/points/random_points_buffEnv_stusps_30JAN2023'
-    get_uncultivated_points(pts, 'random_points_30JAN2023')
+    pts = 'users/dgketchum/expansion/points/uncult_add_2FEB2023'
+    # get_uncultivated_points(pts, 'uncult_add_2FEB2023')
 
-    extract_loc = 'users/dgketchum/expansion/tables_29DEC2022/'
-    ic = 'users/dgketchum/expansion/eff_ppt_indir'
-    # export_classification(extract_loc, ic, clip, years_, irr_mask=False, gridmet_res=True)
-    clip = 'users/dgketchum/expansion/columbia_basin'
-    mask = 'users/dgketchum/expansion/test_buff_env'
-    shard = '/media/research/IrrigationGIS/expansion/shapefiles/grids/shard_wa.shp'
-    # export_pixels(mask, clip, years=[2020], shardfile=shard)
+    points_ = 'users/dgketchum/expansion/points/uncult_pts_mod_2FEB2023'
+    bucket = 'wudr'
+    years_ = [x for x in range(1987, 2022)]
+    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    request_band_extract('bands_2FEB2023', points_, clip, years_, 30, clamp_et=True)
 
 # ========================= EOF ====================================================================
