@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 
 from call_ee import PROPS
-from hosted.hosted_conf import MODEL_DIR
 
 abspath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(abspath)
@@ -217,7 +216,7 @@ def find_rf_variable_importance(csv_dir, glob=None, importance_json=None):
     years_ = [x for x in range(2000, 2021)]
     years_.reverse()
 
-    for i, m in enumerate(range(4, 6)):
+    for i, m in enumerate(range(5, 11)):
         print('\nmonth {}'.format(m))
         master, first = {}, True
         for year in years_:
@@ -262,7 +261,7 @@ if __name__ == '__main__':
     # test_covariate_shift(tprepped, iprepped)
 
     imp_js = os.path.join(root, 'expansion', 'analysis', 'importance')
-    # find_rf_variable_importance(prepped, glob='bands_29DEC2022', importance_json=imp_js)
+    find_rf_variable_importance(tprepped, glob='bands_29DEC2022', importance_json=imp_js)
 
     # model_data(tprepped, importance=imp_js, glob='bands_29DEC2022', n_feats=20)
 # ========================= EOF ====================================================================

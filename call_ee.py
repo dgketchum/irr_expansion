@@ -18,6 +18,7 @@ RF_ASSET = 'projects/ee-dgketchum/assets/IrrMapper/IrrMapperComp'
 UMRB_CLIP = 'users/dgketchum/boundaries/umrb_ylstn_clip'
 CMBRB_CLIP = 'users/dgketchum/boundaries/CMB_RB_CLIP'
 CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
+KLAMATH_CLIP = 'users/dgketchum/boundaries/klamath_rogue_buff'
 BOUNDARIES = 'users/dgketchum/boundaries'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
@@ -173,6 +174,7 @@ def irr_et_data(yr):
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
+    klamath_clip = ee.FeatureCollection(KLAMATH_CLIP)
     bands = None
     names = []
     for month in range(4, 11):
@@ -191,12 +193,17 @@ def irr_et_data(yr):
         et_coll = annual_coll.filter(ee.Filter.date(s, e))
         et_corb = et_coll.sum().clip(corb_clip.geometry())
 
+        annual_coll = ee.ImageCollection('users/kelseyjencso/ssebop/klamath').merge(
+            ee.ImageCollection('users/dpendergraph/ssebop/klamath'))
+        et_coll = annual_coll.filter(ee.Filter.date(s, e))
+        et_klam = et_coll.sum().clip(klamath_clip.geometry())
+
         annual_coll_ = ee.ImageCollection('projects/usgs-ssebop/et/umrb')
         et_coll = annual_coll_.filter(ee.Filter.date(s, e))
         et_umrb = et_coll.sum().clip(umrb_clip.geometry())
 
         names.append('et_{}'.format(month))
-        et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
+        et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb, et_klam]).mosaic()
         et = et_sum.multiply(0.00001)
 
         if month == 4:
@@ -329,6 +336,16 @@ def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_
             task.start()
             print(desc)
 
+            if yr == 2021:
+                desc = '{}_{}_aux_{}'.format(file_prefix, st, yr)
+                task = ee.batch.Export.table.toCloudStorage(
+                    plot_sample_regions,
+                    description=desc,
+                    bucket='wudr',
+                    fileNamePrefix=desc,
+                    fileFormat='CSV')
+                task.start()
+
 
 def landsat_c2_sr(input_img):
     # credit: cgmorton; https://github.com/Open-ET/openet-core-beta/blob/master/openet/core/common.py
@@ -411,10 +428,10 @@ if __name__ == '__main__':
     pts = 'users/dgketchum/expansion/points/uncult_add_2FEB2023'
     # get_uncultivated_points(pts, 'uncult_add_2FEB2023')
 
-    points_ = 'users/dgketchum/expansion/points/uncult_pts_mod_2FEB2023'
+    points_ = 'users/dgketchum/expansion/points/points_nonforest_2FEB2023'
     bucket = 'wudr'
     years_ = [x for x in range(1987, 2022)]
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
+    clip = 'users/dgketchum/expansion/study_area_klamath'
     request_band_extract('bands_2FEB2023', points_, clip, years_, 30, clamp_et=True)
 
 # ========================= EOF ====================================================================

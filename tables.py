@@ -294,10 +294,10 @@ if __name__ == '__main__':
     # merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
     #                         glob='ietr_nonreclamation_24JAN2023', join_key='FID')
 
-    d = os.path.join(root, 'shapefiles', 'points_30JAN2023')
+    d = os.path.join(root, 'shapefiles', 'uncult_addition_2FEB2023')
     data = os.path.join(d, 'uncult_data')
-    oshp = os.path.join(d, 'uncult_pts_30JAN2023.shp')
-    ishp = os.path.join(d, 'random_points_buffEnv_stusps_30JAN2023.shp')
+    oshp = os.path.join(d, 'uncult_pts_mod_2FEB2023.shp')
+    ishp = os.path.join(d, 'uncult_pts_mod_30JAN2023.shp')
     join_csv_shapefile(ishp, data, oshp, join_feat='id')
 
 

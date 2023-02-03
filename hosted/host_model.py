@@ -1,6 +1,5 @@
 import os
 import json
-import time
 from subprocess import CalledProcessError
 from subprocess import Popen, PIPE, check_call
 from calendar import monthrange
@@ -17,11 +16,10 @@ from keras.callbacks import ReduceLROnPlateau, EarlyStopping
 import tensorflow as tf
 from tensorflow.python.tools import saved_model_utils
 
-from googleapiclient import discovery
-from googleapiclient import errors
+from call_ee import stack_bands, PROPS
 
-from call_ee import stack_bands, BASIN_STATES, BOUNDARIES
-from assets import list_bucket_files
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+os.environ['CUDA_VISIBLE_DEVICES'] = '/gpu:0'
 
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 home = os.path.expanduser('~')
@@ -91,9 +89,17 @@ class DNN:
             tf.keras.layers.Dense(16, activation='relu'),
             tf.keras.layers.Conv2D(1, (1, 1), activation='linear')
         ])
-        model.compile(loss='mean_absolute_error',
-                      optimizer=tf.keras.optimizers.Adam(0.01))
+        model.compile(loss=self.custom_loss,
+                      optimizer=tf.keras.optimizers.Adam(0.001))
         self.model = model
+
+    def custom_loss(self, y, pred):
+        error = 100 * (pred - y)
+        condition = tf.greater(error, 0)
+        overestimation_loss = 3 * tf.square(error)
+        underestimation_loss = 1 * tf.square(error)
+        cost = tf.reduce_mean(tf.where(condition, overestimation_loss, underestimation_loss))
+        return cost
 
     def parse_tfrecord(self, example_proto):
         parsed_features = tf.io.parse_single_example(example_proto, self.features_dict)
@@ -126,9 +132,17 @@ class DNN:
                                                   np.count_nonzero(np.isnan(s))))
         print('{} records'.format(records_ct))
 
+    def get_available_features(self, data_dir):
+        training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
+        dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
+        for raw_record in dataset.take(1):
+            example = tf.train.Example()
+            example.ParseFromString(raw_record.numpy())
+            print(example)
+
     def train(self, batch, data_dir, save_test_data=None):
 
-        training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir) if 'WA' in p]
+        training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
         split = 5
@@ -147,10 +161,12 @@ class DNN:
 
         self.prepare(len(self.feature_names))
 
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=2, min_lr=0.001, cooldown=3)
-        early_stopping = EarlyStopping(monitor='val_loss', patience=5, mode='auto', restore_best_weights=True)
-        self.model.fit(x=input_dataset, verbose=1, epochs=10, validation_data=input_test,
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, min_lr=0.00001, cooldown=3)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=15, mode='auto',
+                                       restore_best_weights=True, min_delta=0.00001)
+        self.model.fit(x=input_dataset, verbose=1, epochs=1000, validation_data=input_test,
                        validation_freq=1, callbacks=[reduce_lr, early_stopping])
+        self.model.get_config()
 
         y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
         x_test = np.concatenate([x for x, y in input_test], axis=0)[:, 0, 0, :]
@@ -302,9 +318,9 @@ class DNN:
         task.start()
         print(asset_id, target_str)
 
-    def infer_local(self, in_rasters, out_rasters):
+    def infer_local(self, in_rasters, out_rasters, calc_diff=False, overwrite=False):
 
-        rasters = [os.path.join(in_rasters, x) for x in os.listdir(in_rasters)]
+        rasters = [os.path.join(in_rasters, x) for x in os.listdir(in_rasters) if x.endswith('.tif')]
         rasters = sorted(rasters)
         rasters.reverse()
 
@@ -315,10 +331,25 @@ class DNN:
 
         self.unordered_index = [raster_info['descriptions'].index(p) for p in self.feature_names]
 
-        for r in rasters:
+        for r in rasters[:1]:
             base = os.path.basename(r)
             out_raster_file = os.path.join(out_rasters, base.replace('.', '_{}.'.format(self.label)))
+            if os.path.exists(out_raster_file) and not overwrite:
+                print('{} exists, skipping'.format(os.path.basename(out_raster_file)))
+                continue
             self._write_inference(r, out_raster_file)
+            if calc_diff:
+                ind = raster_info['descriptions'].index(self.target)
+                diff_file = out_raster_file.replace('.tif', '_diff.tif')
+                with rasterio.open(out_raster_file, 'r') as src:
+                    pred = src.read()
+                    meta = src.meta
+                with rasterio.open(r, 'r') as src:
+                    obs = src.read(ind)
+                diff = pred - obs
+                with rasterio.open(diff_file, 'w', **meta) as dst:
+                    dst.write(diff)
+                print(diff_file)
 
     def _parse_image(self, img):
         img = img[self.unordered_index, :, :]
@@ -336,105 +367,14 @@ class DNN:
                 for block_index, window in src.block_windows(1):
                     block_array = src.read(window=window)
                     shp = (1, block_array.shape[1], block_array.shape[2])
-                    if not np.all(np.isnan(block_array)):
-                        ds = self._parse_image(block_array)
-                        ds = tf.data.Dataset.from_tensor_slices([ds])
-                        result = self.model.predict(ds, verbose=0).reshape(shp)
-                        result = np.where(np.isnan(result), np.ones_like(result) - 2, result)
-                    else:
-                        result = np.zeros_like(block_array)[:1, :, :] - 1
-                    print(np.nanmedian(result), np.nanstd(result))
+                    ds = self._parse_image(block_array)
+                    ds = tf.data.Dataset.from_tensor_slices([ds])
+                    result = self.model.predict(ds, verbose=0).reshape(shp)
                     dst.write(result, window=window)
         print(outras)
 
     def load(self):
-        self.model = tf.keras.models.load_model(self.model_dir)
-
-
-def remove_models(model_name, gc_project_id):
-    project_id = 'projects/{}'.format(gc_project_id)
-    model_id = '{}/models/{}'.format(project_id, model_name)
-
-    ml = discovery.build('ml', 'v1')
-    request = ml.projects().models().versions().list(parent=model_id)
-    response = request.execute()
-
-    if 'versions' in response.keys():
-        versions = response['versions']
-        while len(versions) >= 1:
-            for version in response['versions']:
-                request = ml.projects().models().versions().delete(name=version['name'])
-                try:
-                    request.execute()
-                except errors.HttpError as err:
-                    reason = err._get_reason()
-                    if 'Cannot delete the default version' in reason:
-                        next
-
-            request = ml.projects().models().versions().list(parent=model_id)
-            response = request.execute()
-            time.sleep(1)
-            try:
-                versions = response['versions']
-            except:
-                break
-
-    request = ml.projects().models().delete(name=model_id)
-
-    while True:
-        try:
-            response = request.execute()
-        except errors.HttpError as err:
-            print('There was an error deleting the model.' +
-                  ' Check the details:')
-            reason = err._get_reason()
-            print(reason)
-            if 'A model with versions cannot be deleted' in reason:
-                time.sleep(1)
-                continue
-        break
-
-
-def request_band_extract(file_prefix, points_layer, region, years, clamp_et=False):
-    ee.Initialize()
-    roi = ee.FeatureCollection(region)
-    points = ee.FeatureCollection(points_layer)
-
-    for st in BASIN_STATES:
-        if st not in ['CA', 'OR']:
-            continue
-        for yr in years:
-
-            scale_feats = {'climate': 0.001, 'soil': 0.01, 'terrain': 0.001}
-            stack = stack_bands(yr, roi, VERSION_SCALE, **scale_feats)
-
-            state_bound = ee.FeatureCollection(os.path.join(BOUNDARIES, st))
-            stack = stack.clip(state_bound)
-            st_points = points.filterMetadata('STUSPS', 'equals', st)
-
-            # st_points = ee.FeatureCollection(ee.Geometry.Point(-120.260594, 46.743666))
-
-            plot_sample_regions = stack.sampleRegions(
-                collection=st_points,
-                scale=30,
-                tileScale=16,
-                projection=ee.Projection('EPSG:4326'))
-
-            if clamp_et:
-                plot_sample_regions = plot_sample_regions.filter(ee.Filter.lt('ratio', ee.Number(1.0)))
-
-            # point = plot_sample_regions.first().getInfo()
-
-            desc = '{}_{}_{}'.format(file_prefix, st, yr)
-            task = ee.batch.Export.table.toCloudStorage(
-                plot_sample_regions,
-                description=desc,
-                bucket='wudr',
-                fileNamePrefix=desc,
-                fileFormat='TFRecord')
-
-            task.start()
-            print(desc)
+        self.model = tf.keras.models.load_model(self.model_dir, compile=False)
 
 
 def export_inference_rasters():
@@ -463,35 +403,26 @@ def export_inference_rasters():
 
 if __name__ == '__main__':
 
-    root = '/media/research/IrrigationGIS'
+    root = '/media/nvm/ept'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
-
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
-    asset_rt = 'users/dgketchum/expansion/eff_ppt_gcloud'
+        root = '/home/dgketchum/data/ept'
 
     tf.keras.utils.set_random_seed(1234)
 
+    data = os.path.join(root, 'tfr')
     VERSION_NAME = 'v00'
-    PROPS = sorted(['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et'])
 
     for m in range(4, 11):
         t = 'et_{}'.format(m)
         model_dir = os.path.join(MODEL_DIR, t)
         nn = DNN(month=m, label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
-        nn.train(2560, '/media/nvm/ept/tfr'.format(t))
+        nn.train(2560, data)
         nn.save()
         # nn.load()
-        nn.infer_local('/media/nvm/ept/small_stack',
-                       '/media/nvm/ept/small_stack_pred')
-
-    points_ = 'users/dgketchum/expansion/points/pts_30JAN2023'
-    bucket = 'wudr'
-    years_ = [x for x in range(1987, 2022)]
-    clip = 'users/dgketchum/expansion/study_area_dissolve'
-    # request_band_extract('bands_30JAN2023', points_, clip, years_, clamp_et=True)
-
-    # export_inference_rasters()
+        # nn.infer_local(os.path.join(root, 'full_stack'),
+        #                os.path.join(root, 'full_stack_pred'),
+        #                calc_diff=True,
+        #                overwrite=True)
 
 # ========================= EOF ====================================================================

@@ -1,6 +1,7 @@
 import os
 import csv
 from pprint import pprint
+from datetime import datetime
 from calendar import monthrange
 from subprocess import check_call, Popen, PIPE
 
@@ -86,6 +87,27 @@ def push_points_to_asset(_dir, state, bucket):
     print(asset_id, bucket_files[0])
 
 
+def push_images_to_asset(_dir, asset_folder, glob, bucket):
+    asset_pref = 'projects/earthengine-legacy/assets'
+    transferred, asset_ids = [], []
+    l = [os.path.join(_dir, x) for x in os.listdir(_dir) if glob in x]
+    existing = list_assets(asset_folder)
+
+    for local_f in l:
+        base_ = os.path.basename(local_f)
+        gcs_file = os.path.join(bucket, base_)
+        cmd = [GS, 'cp', local_f, gcs_file]
+        transferred.append(gcs_file)
+        asset_id = os.path.join(asset_pref, asset_folder, base_.split('.')[0])
+        if asset_id not in existing:
+            check_call(cmd)
+            asset_ids.append(asset_id)
+
+    for gcs_file, asset_id in zip(transferred, asset_ids):
+        cmd = [EE, 'upload', 'image', '-f', '--asset_id={}'.format(asset_id), gcs_file]
+        check_call(cmd)
+
+
 def copy_asset(ee_asset, dst):
     cmd = ['{}'.format(EE), 'cp', ee_asset, dst]
     check_call(cmd)
@@ -127,20 +149,37 @@ def set_metadata(ee_asset, string):
     check_call(cmd)
 
 
+def set_time_metadata(asset):
+    splt = os.path.basename(asset).split('_')
+    yr, month = int(splt[4]), int(splt[6])
+    end_day = monthrange(yr, month)[1]
+    cmd = ['{}'.format(EE), 'asset', 'set',
+           '{}'.format('--time_start'), '{}-{}-01T00:00:00'.format(yr, str(month).rjust(2, '0')), asset]
+    print(' '.join(cmd))
+    check_call(cmd)
+
+    cmd = ['{}'.format(EE), 'asset', 'set',
+           '{}'.format('--time_end'), '{}-{}-{}T00:00:00'.format(yr, str(month).rjust(2, '0'),
+                                                                 str(end_day)), asset]
+    print(' '.join(cmd))
+    check_call(cmd)
+
+
 if __name__ == '__main__':
     is_authorized()
     _bucket = 'gs://wudr'
-    root = '/media/research/IrrigationGIS'
+    root = '/media/research/IrrigationGIS/expansion'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
+        root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    # d_ = os.path.join(root, 'openET', 'OpenET_GeoDatabase_centroids_5071')
-    # for s in ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
-    #     push_points_to_asset(d_, s, _bucket)
+    d = '/media/nvm/ept/full_stack_pred'
+    af = 'users/dgketchum/expansion/eff_ppt'
+    glob = 'ept_image_full_stack'
+    bucket_ = 'gs://wudr'
+    # push_images_to_asset(d, af, glob, bucket_)
 
-    asset_root = 'users/dgketchum/expansion/tables_29DEC2022'
-    bands_out = os.path.join(root, 'expansion', 'tables', 'prepped_bands', 'bands_29DEC2022')
-    dest = os.path.join(_bucket, 'bands_29DEC2022')
-    push_bands_to_asset(bands_out, asset_root, 'bands_29DEC2022', dest)
+    l = list_assets(af)
+    for f in l:
+        set_time_metadata(f)
 
 # ========================= EOF ====================================================================
