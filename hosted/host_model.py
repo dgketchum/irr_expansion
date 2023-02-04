@@ -4,6 +4,7 @@ from subprocess import CalledProcessError
 from subprocess import Popen, PIPE, check_call
 from calendar import monthrange
 from datetime import date
+import pickle as pkl
 
 import ee
 import numpy as np
@@ -38,7 +39,6 @@ MODEL_NAME = 'ept_model_{}'
 DATA_BUCKET = 'wudr'
 OUTPUT_BUCKET = 'wudr'
 REGION = 'us-central1'
-MODEL_DIR = '/media/nvm/ept/ept_models'
 EEIFIED_DIR = 'gs://wudr/ept_model_eeified'
 VERSION_SCALE = 1000
 
@@ -53,6 +53,8 @@ class DNN:
         :param label: String target
         :param _dir: GCS Bucket where the model is heading
         '''
+        self.mean_ = None
+        self.std_ = None
         self.unordered_index = None
         self.indices = None
         self.normalizer = None
@@ -62,6 +64,7 @@ class DNN:
         self.model_name = None
         self.month = month
         self.target = 'et_{}'.format(month)
+        self.norm_weight_file = os.path.join(self.model_dir, 'norm_weights.npy')
 
         if _dir and label:
             self.ee_dir = os.path.join(EEIFIED_DIR, self.label)
@@ -73,8 +76,12 @@ class DNN:
     def prepare(self, n_inputs):
         model = tf.keras.models.Sequential([
             tf.keras.layers.Input((None, None, n_inputs,)),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Conv2D(64, (1, 1), activation=tf.nn.relu),
+            # tf.keras.layers.BatchNormalization(),
+            # tf.keras.layers.Conv2D(64, (1, 1), activation=tf.nn.relu),
+            tf.keras.layers.Dense(16, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
+            tf.keras.layers.Dense(32, activation='relu'),
+            tf.keras.layers.Dropout(0.2),
             tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dropout(0.2),
             tf.keras.layers.Dense(128, activation='relu'),
@@ -87,7 +94,8 @@ class DNN:
             tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dense(32, activation='relu'),
             tf.keras.layers.Dense(16, activation='relu'),
-            tf.keras.layers.Conv2D(1, (1, 1), activation='linear')
+            tf.keras.layers.Dense(1, activation='linear'),
+            # tf.keras.layers.Conv2D(1, (1, 1), activation='linear')
         ])
         model.compile(loss=self.custom_loss,
                       optimizer=tf.keras.optimizers.Adam(0.001))
@@ -101,37 +109,50 @@ class DNN:
         cost = tf.reduce_mean(tf.where(condition, overestimation_loss, underestimation_loss))
         return cost
 
+    def normalize_fixed(self, x):
+        x_normed = (x - self.mean_) / self.std_
+        return x_normed
+
     def parse_tfrecord(self, example_proto):
         parsed_features = tf.io.parse_single_example(example_proto, self.features_dict)
         labels = parsed_features.pop(self.target)
         return parsed_features, tf.cast(labels, tf.float32)
 
-    @staticmethod
-    def to_tuple(inputs, label):
+    def to_tuple(self, inputs, label):
         lb1 = tf.expand_dims(label, 1)
         lb1 = tf.expand_dims(lb1, 1)
         feats = tf.expand_dims(tf.transpose(list(inputs.values())), 1)
+        # feats = self.normalize_fixed(feats)
         return feats, lb1
 
-    def check_data(self, batch, data_dir):
+    def calc_mean_std(self, data_dir):
 
         training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
         parsed_training = dataset.map(self.parse_tfrecord, num_parallel_calls=5)
 
         input_dataset = parsed_training.map(self.to_tuple)
-        input_dataset = input_dataset.shuffle(1000).batch(batch)
-        records_ct = 0
-        for e, (i, s) in enumerate(input_dataset):
-            records_ct += i.shape[0]
-            i = np.array(i)
-            s = np.array(s)
-            if e % 1000 == 0:
-                print('{}, {:.3f}, {}, {}'.format(np.mean(i, axis=0).flatten(), np.mean(s),
-                                                  np.count_nonzero(np.isnan(i)),
-                                                  np.count_nonzero(np.isnan(s))))
-        print('{} records'.format(records_ct))
+        input_dataset = input_dataset.shuffle(1000)
+        mean_, std_, M2 = 0, 0, 0
 
+        for e, (f, l) in enumerate(input_dataset):
+            f = np.array(f).squeeze()
+            delta = f - mean_
+            mean_ = mean_ + delta / (e + 1)
+            delta2 = f - mean_
+            M2 = M2 + delta * delta2
+            std_ = np.sqrt(M2 / (e + 1))
+
+        pkl_name = os.path.join(self.model_dir, 'meanstd.pkl')
+        with open(pkl_name, 'wb') as handle:
+            pkl.dump((mean_, std_), handle, protocol=pkl.HIGHEST_PROTOCOL)
+
+    def get_norm(self):
+
+        norm = pkl.load(open(os.path.join(self.model_dir, 'meanstd.pkl'), 'rb'))
+        return norm
+
+    @staticmethod
     def get_available_features(self, data_dir):
         training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
@@ -142,6 +163,13 @@ class DNN:
 
     def train(self, batch, data_dir, save_test_data=None):
 
+        if not os.path.exists(os.path.join(self.model_dir, 'meanstd.pkl')):
+            self.calc_mean_std(data_dir)
+
+        norm = self.get_norm()
+        self.mean_ = norm[0]
+        self.std_ = norm[1]
+
         training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
@@ -149,9 +177,9 @@ class DNN:
         train_dataset = dataset.window(split, split + 1).flat_map(lambda ds: ds)
         parsed_training = train_dataset.map(self.parse_tfrecord, num_parallel_calls=5)
 
+        samp = iter(parsed_training).next()
         input_dataset = parsed_training.map(self.to_tuple)
         input_dataset = input_dataset.shuffle(1000).batch(batch)
-        samp = iter(input_dataset).next()
 
         test_dataset = dataset.skip(split).window(1, split + 1).flat_map(lambda ds: ds)
         parsed_test = test_dataset.map(self.parse_tfrecord, num_parallel_calls=5)
@@ -161,10 +189,10 @@ class DNN:
 
         self.prepare(len(self.feature_names))
 
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, min_lr=0.00001, cooldown=3)
-        early_stopping = EarlyStopping(monitor='val_loss', patience=15, mode='auto',
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=2, min_lr=0.00001, cooldown=3)
+        early_stopping = EarlyStopping(monitor='val_loss', patience=5, mode='auto',
                                        restore_best_weights=True, min_delta=0.00001)
-        self.model.fit(x=input_dataset, verbose=1, epochs=1000, validation_data=input_test,
+        self.model.fit(x=input_dataset, verbose=1, epochs=10, validation_data=input_test,
                        validation_freq=1, callbacks=[reduce_lr, early_stopping])
         self.model.get_config()
 
@@ -408,21 +436,29 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/ept'
 
     tf.keras.utils.set_random_seed(1234)
+    models = '/media/nvm/ept/ept_model_zoran_3FEB2023'
 
     data = os.path.join(root, 'tfr')
     VERSION_NAME = 'v00'
 
     for m in range(4, 11):
         t = 'et_{}'.format(m)
-        model_dir = os.path.join(MODEL_DIR, t)
+        model_dir = os.path.join(models, t)
         nn = DNN(month=m, label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
-        nn.train(2560, data)
-        nn.save()
-        # nn.load()
-        # nn.infer_local(os.path.join(root, 'full_stack'),
-        #                os.path.join(root, 'full_stack_pred'),
-        #                calc_diff=True,
-        #                overwrite=True)
+        # nn.train(2560, data)
+        # nn.save()
+        nn.load()
+        nn.infer_local(os.path.join(root, 'full_stack'),
+                       os.path.join(root, 'full_stack_pred'),
+                       calc_diff=False,
+                       overwrite=True)
 
+    # m = 'gs'
+    # t = 'et_{}'.format(m)
+    # model_dir = os.path.join(model_dir, t)
+    # nn = DNN(month=m, label=t, _dir=model_dir)
+    # nn.model_name = MODEL_NAME.format(m)
+    # nn.train(2560, data)
+    # nn.save()
 # ========================= EOF ====================================================================
