@@ -6,7 +6,7 @@ from scipy.stats import linregress
 from climate_indices import compute, indices
 
 from gage_data import hydrograph
-from figures.plot_indices import plot_indices_panel
+from figures.plot_indices import plot_indices_panel, plot_indices_panel_nonstream
 
 
 def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, desc_str='basin'):
@@ -17,6 +17,8 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
         dct = {}
         out_json = os.path.join(out_meta, '{}_{}.json'.format(desc_str, month_end))
         for sid, sdata in stations.items():
+            if sid != '00000230':
+                continue
 
             if basins:
                 print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
@@ -99,6 +101,13 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                     fig_file = os.path.join(plot_dir, '{}_{}.png'.format(sid, met_param))
                     plot_indices_panel(df, met_param, use_timescale, month_end, fig_file, title_str=sdata['STANAME'])
 
+            elif plot_dir and month_end == 10:
+                for met_param in ['SPI_12', 'SPEI_12']:
+                    use_timescale = 2
+                    fig_file = os.path.join(plot_dir, '{}_{}_{}.png'.format(sid, month_end, met_param))
+                    plot_indices_panel_nonstream(df, met_param, use_timescale, month_end, fig_file,
+                                                 title_str=sdata['NAME'])
+
             dct[sid] = {}
             combos = [('SPI', 'SCUI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPEI', 'SIMI')]
             if basins:
@@ -141,14 +150,16 @@ if __name__ == '__main__':
     figs = os.path.join(root, 'figures', 'panel')
     # write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='huc8')
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_reclamation_24JAN2023')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_reclamation_6FEB2023')
     data_ = os.path.join(root, 'gages', 'usbr_metadata_north.json')
     out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='usbr')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_reclamation_6FEB2023')
+    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='usbr')
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_24JAN2023')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_6FEB2023')
     data_ = os.path.join(root, 'gages', 'nonreclamation_metadata_north.json')
     out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='nonusbr')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_nonreclamation_6FEB2023')
+    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='nonusbr')
 
 # ========================= EOF ====================================================================

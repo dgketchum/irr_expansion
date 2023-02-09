@@ -1,6 +1,6 @@
 import os
 import geopandas as gpd
-from shapely.geometry import MultiLineString, LineString, MultiPolygon
+from shapely.geometry import MultiLineString, LineString
 
 
 def join_districts(_dir, out_shp):
@@ -34,18 +34,27 @@ def join_districts(_dir, out_shp):
                 else:
                     _name = r['NAME']
 
+                try:
+                    _name = _name.replace(' ', '_').lower()
+                except AttributeError:
+                    _name = '{}_{}'.format(bname, i + 1)
+
                 row = {'geometry': geo, 'name': _name, 'id': ct}
                 odf.loc[ct] = row
                 ct += 1
+                print(_name)
         else:
             if not name:
                 _name = bname
             else:
                 _name = df.loc[0, 'NAME']
+                _name = _name.replace(' ', '_').lower()
             row = {'geometry': df.loc[0, 'geometry'], 'name': _name, 'id': ct}
             odf.loc[ct] = row
             ct += 1
-    odf.to_file(out_shp)
+            print(_name)
+
+    odf.to_file(out_shp, crs='EPSG:4326')
 
 
 if __name__ == '__main__':
@@ -56,6 +65,6 @@ if __name__ == '__main__':
     br = os.path.join(root, 'usbr')
     singles = os.path.join(br, 'to_merge')
     joined = os.path.join(br, 'merged')
-    out_file = os.path.join(joined, 'usbr_districts_north.shp')
+    out_file = os.path.join(joined, 'usbr_districts_north_7FEB2023.shp')
     join_districts(singles, out_file)
 # ========================= EOF ====================================================================

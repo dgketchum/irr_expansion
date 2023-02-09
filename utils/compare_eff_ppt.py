@@ -80,7 +80,7 @@ if __name__ == '__main__':
     meta_ = os.path.join(root, 'expansion', 'gages', 'irrigated_gage_metadata.json')
     swb_ = os.path.join(root, 'impacts', 'tables', 'input_flow_climate_tables', 'IrrMapperComp_21OCT2022')
     interp_ = os.path.join(root, 'expansion', 'tables', 'input_flow_climate_tables', 'extracts_NatET_terrain_23DEC2022')
-    fig_ = os.path.join(root, 'expansion', 'figures', 'swb_interp_comparison')
+    fig_ = os.path.join(root, 'expansion', '../figures', 'swb_interp_comparison')
 
     compare(meta_, interp_, swb_, fig_)
 

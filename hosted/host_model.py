@@ -4,7 +4,7 @@ from subprocess import CalledProcessError
 from subprocess import Popen, PIPE, check_call
 from calendar import monthrange
 from datetime import date
-import pickle as pkl
+from multiprocessing import Pool
 
 import ee
 import numpy as np
@@ -331,7 +331,7 @@ class DNN:
 
         self.unordered_index = [raster_info['descriptions'].index(p) for p in self.feature_names]
 
-        for r in rasters[:1]:
+        for r in rasters[1:]:
             base = os.path.basename(r)
             out_raster_file = os.path.join(out_rasters, base.replace('.', '_{}.'.format(self.label)))
             if os.path.exists(out_raster_file) and not overwrite:
@@ -379,14 +379,12 @@ class DNN:
 
 def export_inference_rasters():
     ee.Initialize()
-    roi = ee.FeatureCollection('users/dgketchum/study_area_klamath')
+    roi = ee.FeatureCollection('users/dgketchum/expansion/study_area_klamath')
     geo = roi.geometry()
-    props = sorted(['elevation', 'slope', 'aspect', 'etr_gs', 'ppt_gs', 'ppt_wy_et'])
 
-    for yr in range(2021, 2022):
+    for yr in range(1987, 2022):
         scale_feats = {'climate': 0.001, 'soil': 0.01, 'terrain': 0.001}
-        stack = stack_bands(yr, roi, VERSION_SCALE, **scale_feats)
-        stack = stack.select(props)
+        stack = stack_bands(yr, roi, 1000, **scale_feats)
 
         desc = 'ept_image_full_stack_{}'.format(yr)
         task = ee.batch.Export.image.toCloudStorage(
@@ -426,11 +424,4 @@ if __name__ == '__main__':
                        calc_diff=False,
                        overwrite=True)
 
-    # m = 'gs'
-    # t = 'et_{}'.format(m)
-    # model_dir = os.path.join(model_dir, t)
-    # nn = DNN(month=m, label=t, _dir=model_dir)
-    # nn.model_name = MODEL_NAME.format(m)
-    # nn.train(2560, data)
-    # nn.save()
 # ========================= EOF ====================================================================

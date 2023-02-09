@@ -1,7 +1,6 @@
 import os
 import csv
 from pprint import pprint
-from datetime import datetime
 from calendar import monthrange
 from subprocess import check_call, Popen, PIPE
 
@@ -173,7 +172,7 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
     d = '/media/nvm/ept/full_stack_pred'
-    af = 'users/dgketchum/expansion/eff_ppt'
+    af = 'users/dgketchum/expansion/ept'
     glob = 'ept_image_full_stack'
     bucket_ = 'gs://wudr'
     # push_images_to_asset(d, af, glob, bucket_)

@@ -1,14 +1,12 @@
 import os
 import sys
-from datetime import date
+import time
 from calendar import monthrange
 
 import ee
-import pandas as pd
-import geopandas as gpd
 
-from cdl import get_cdl
-from ee_utils import get_world_climate
+from utils.cdl import get_cdl
+from utils.ee_utils import get_world_climate
 
 sys.path.insert(0, os.path.abspath('..'))
 
@@ -333,7 +331,7 @@ def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_
                 fileNamePrefix=desc,
                 fileFormat='TFRecord')
 
-            task.start()
+            ee_task_start(task)
             print(desc)
 
             if yr == 2021:
@@ -420,6 +418,19 @@ def is_authorized():
     except Exception as e:
         print('You are not authorized: {}'.format(e))
         return False
+
+
+def ee_task_start(task, n=6):
+    """Make an exponential backoff Earth Engine request, credit cgmorton"""
+    for i in range(1, n):
+        try:
+            task.start()
+            break
+        except Exception as e:
+            print('    Resending query ({}/{})'.format(i, n))
+            time.sleep(i ** 2)
+
+    return task
 
 
 if __name__ == '__main__':

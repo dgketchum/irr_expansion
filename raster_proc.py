@@ -58,6 +58,14 @@ def get_summaries(stack, prediction, year, out_dir):
     print(out_img)
 
 
+def set_band_desc(_dir):
+    l = [os.path.join(_dir, x) for x in os.listdir(_dir)]
+    for f in l:
+        cmd = [RINFO, 'edit-info', f, '-b', '1', '--description', 'eff_ppt']
+        check_call(cmd)
+        print(f)
+
+
 if __name__ == '__main__':
     root = '/media/nvm/ept'
     if not os.path.exists(root):
@@ -72,5 +80,11 @@ if __name__ == '__main__':
     prediction_ = os.path.join(root, 'full_stack_pred')
     out_images = os.path.join(root, 'pred_summaries')
 
-    get_summaries(feature_stack, prediction_, 2021, out_images)
+    set_band_desc(prediction_)
+
+    # for y in range(1987, 2021):
+    #     try:
+    #         get_summaries(feature_stack, prediction_, y, out_images)
+    #     except Exception as e:
+    #         print(e)
 # ========================= EOF ====================================================================

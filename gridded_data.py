@@ -5,6 +5,7 @@ from calendar import monthrange
 import numpy as np
 import ee
 
+from call_ee import ee_task_start
 
 sys.path.insert(0, os.path.abspath('..'))
 sys.setrecursionlimit(5000)
@@ -13,7 +14,9 @@ RF_ASSET = 'projects/ee-dgketchum/assets/IrrMapper/IrrMapperComp'
 UMRB_CLIP = 'users/dgketchum/boundaries/umrb_ylstn_clip'
 CMBRB_CLIP = 'users/dgketchum/boundaries/CMB_RB_CLIP'
 CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
+KLAMATH_CLIP = 'users/dgketchum/boundaries/klamath_rogue_buff'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
+BASIN_STATES = ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 
 def get_geomteries():
@@ -41,7 +44,7 @@ def get_geomteries():
 
 
 def export_gridded_data(tables, bucket, years, description, features=None,
-                        min_years=5, debug=False, join_col='STAID'):
+                        min_years=5, debug=False, join_col='STAID', geo_type='Polygon'):
     """
     Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
     Use this to get e.g. irrigated area within a county, HUC, or state. This can mask based on Crop Data Layer,
@@ -59,12 +62,16 @@ def export_gridded_data(tables, bucket, years, description, features=None,
     :return:
     """
     initialize()
+
     fc = ee.FeatureCollection(tables)
+    fc = fc.randomColumn('rand')
+
     if features:
         fc = fc.filter(ee.Filter.inList('STAID', features))
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
+    klamath_clip = ee.FeatureCollection(KLAMATH_CLIP)
 
     eff_ppt_coll = ee.ImageCollection('users/dgketchum/expansion/naturalized_et')
     eff_ppt_coll = eff_ppt_coll.map(lambda x: x.rename('eff_ppt'))
@@ -94,11 +101,16 @@ def export_gridded_data(tables, bucket, years, description, features=None,
             et_coll = annual_coll.filter(ee.Filter.date(s, e))
             et_corb = et_coll.sum().multiply(0.00001).clip(corb_clip.geometry())
 
+            annual_coll = ee.ImageCollection('users/kelseyjencso/ssebop/klamath').merge(
+                ee.ImageCollection('users/dpendergraph/ssebop/klamath'))
+            et_coll = annual_coll.filter(ee.Filter.date(s, e))
+            et_klam = et_coll.sum().multiply(0.00001).clip(klamath_clip.geometry())
+
             annual_coll_ = ee.ImageCollection('projects/usgs-ssebop/et/umrb')
             et_coll = annual_coll_.filter(ee.Filter.date(s, e))
             et_umrb = et_coll.sum().multiply(0.00001).clip(umrb_clip.geometry())
 
-            et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
+            et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb, et_klam]).mosaic()
             et = et_sum.mask(irr_mask)
 
             eff_ppt = eff_ppt_coll.filterDate(s, e).select('eff_ppt').mosaic().multiply(0.00001)
@@ -134,10 +146,6 @@ def export_gridded_data(tables, bucket, years, description, features=None,
                 bands = ppt.addBands([etr])
                 select_ = [join_col, 'ppt', 'etr']
 
-            data = bands.reduceRegions(collection=fc,
-                                       reducer=ee.Reducer.sum(),
-                                       scale=30)
-
             if debug:
                 pt = bands.sample(region=get_geomteries()[2],
                                   numPixels=1,
@@ -146,15 +154,53 @@ def export_gridded_data(tables, bucket, years, description, features=None,
                 print('propeteries {}'.format(p))
 
             out_desc = '{}_{}_{}'.format(description, yr, month)
-            task = ee.batch.Export.table.toCloudStorage(
-                data,
-                description=out_desc,
-                bucket=bucket,
-                fileNamePrefix=out_desc,
-                fileFormat='CSV',
-                selectors=select_)
-            task.start()
-            print(out_desc)
+
+            if geo_type == 'Polygon':
+
+                data = bands.reduceRegions(collection=fc,
+                                           reducer=ee.Reducer.sum(),
+                                           scale=30)
+
+                task = ee.batch.Export.table.toCloudStorage(
+                    data,
+                    description=out_desc,
+                    bucket=bucket,
+                    fileNamePrefix=out_desc,
+                    fileFormat='CSV',
+                    selectors=select_)
+
+                task.start()
+                print(out_desc)
+
+            elif geo_type == 'Point':
+
+                sarr = np.linspace(0, 0.9, 10)
+                earr = np.linspace(0.1, 1.0, 10)
+
+                for st in BASIN_STATES:
+
+                    st_points = fc.filterMetadata('STUSPS', 'equals', st)
+
+                    for i, (s_, e_) in enumerate(zip(sarr, earr)):
+                        rpts = st_points.filter(ee.Filter.gt('rand', s_))
+                        rpts = rpts.filter(ee.Filter.lt('rand', e_))
+
+                        out_desc = '{}_{}_{}_{}_{}'.format(description, st, i, yr, month)
+
+                        plot_sample_regions = bands.sampleRegions(
+                            collection=rpts,
+                            scale=30,
+                            tileScale=16)
+
+                        task = ee.batch.Export.table.toCloudStorage(
+                            plot_sample_regions,
+                            description=out_desc,
+                            bucket='wudr',
+                            fileNamePrefix=out_desc,
+                            fileFormat='TFRecord')
+
+                        ee_task_start(task)
+                        print(out_desc)
 
 
 def extract_corrected_etr(year, month):
@@ -188,11 +234,10 @@ def initialize():
 
 if __name__ == '__main__':
     bucket = 'wudr'
-    table = 'users/dgketchum/expansion/nonreclamation'
-    export_gridded_data(table, bucket, list(range(1987, 2022)), 'ietr_nonreclamation_24JAN2023',
-                        min_years=5, debug=False, join_col='FID')
 
-    table = 'users/dgketchum/expansion/reclamation'
-    export_gridded_data(table, bucket, list(range(1987, 2022)), 'ietr_reclamation_24JAN2023',
-                        min_years=5, debug=False, join_col='FID')
+    table_ = 'users/dgketchum/expansion/points/field_pts_attr_8FEB2023'
+    years_ = list(range(1987, 2022))
+    # years_.reverse()
+    export_gridded_data(table_, bucket, years_, 'ietr_fields_8FEB2023', min_years=5,
+                        debug=False, join_col='OPENET_ID', geo_type='Point')
 # ========================= EOF ================================================================================

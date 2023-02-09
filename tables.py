@@ -288,17 +288,12 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', 'ietr_nonreclamation_24JAN2023')
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_24JAN2023')
-    # hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
-    # merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
-    #                         glob='ietr_nonreclamation_24JAN2023', join_key='FID')
+    bname = 'ietr_reclamation_6FEB2023'
 
-    d = os.path.join(root, 'shapefiles', 'uncult_addition_2FEB2023')
-    data = os.path.join(d, 'uncult_data')
-    oshp = os.path.join(d, 'uncult_pts_mod_2FEB2023.shp')
-    ishp = os.path.join(d, 'uncult_pts_mod_30JAN2023.shp')
-    join_csv_shapefile(ishp, data, oshp, join_feat='id')
-
+    basin_extracts = os.path.join(root, 'tables', 'gridded_tables', bname)
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', bname)
+    hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
+    merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
+                            glob=bname, join_key='FID')
 
 # ========================= EOF ====================================================================
