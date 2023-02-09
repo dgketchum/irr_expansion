@@ -10,7 +10,7 @@ import fiona
 from shapely.geometry import Point, shape, mapping
 from rasterstats import zonal_stats
 
-from gage_data import hydrograph
+from sfi.gage_data import hydrograph
 from call_ee import PROPS
 
 DROP = ['left', 'right', 'top', 'bottom']

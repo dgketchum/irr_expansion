@@ -195,7 +195,7 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS'
 
     gages_metadata = os.path.join(root, 'gages', 'irrigated_gage_metadata.json')
-    figures = os.path.join(root, 'figures')
+    figures = os.path.join(root, '../figures')
 
     daily_q = os.path.join(root, 'tables', 'hydrographs', 'daily_q')
     daily_q_fig = os.path.join(figures, 'hydrographs', 'daily_hydrograph_plots')

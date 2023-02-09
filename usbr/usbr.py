@@ -62,7 +62,7 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    br = os.path.join(root, 'usbr')
+    br = os.path.join(root, '')
     singles = os.path.join(br, 'to_merge')
     joined = os.path.join(br, 'merged')
     out_file = os.path.join(joined, 'usbr_districts_north_7FEB2023.shp')

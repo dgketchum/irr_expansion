@@ -6,7 +6,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import shape
 
-from gage_lists import EXCLUDE_STATIONS
+from sfi.gage_lists import EXCLUDE_STATIONS
 
 
 def basin_response(sensitivity_d, in_shape, glob=None, out_shape=None, basins=True, key='STAID'):

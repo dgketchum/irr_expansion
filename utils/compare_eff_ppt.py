@@ -1,17 +1,14 @@
 import os
 import json
 from datetime import date
-from itertools import product
-
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.offsetbox import AnchoredText
 
 from scipy.stats import linregress
 
-from gage_data import hydrograph
+from sfi.gage_data import hydrograph
 
 
 def compare(meta, interp, swb, outfig):

@@ -3,7 +3,7 @@ from pprint import pprint
 import numpy as np
 import pandas as pd
 
-from gage_data import hydrograph
+from sfi.gage_data import hydrograph
 
 
 def merge_gridded_flow_data(gridded_dir, flow_dir, out_dir, start_year=1987, end_year=2021, glob='glob',

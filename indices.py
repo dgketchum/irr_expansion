@@ -5,7 +5,7 @@ from scipy.stats import linregress
 
 from climate_indices import compute, indices
 
-from gage_data import hydrograph
+from sfi.gage_data import hydrograph
 from figures.plot_indices import plot_indices_panel, plot_indices_panel_nonstream
 
 
