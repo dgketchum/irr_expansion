@@ -44,28 +44,14 @@ def get_geomteries():
 
 
 def export_gridded_data(tables, bucket, years, description, features=None, check_exists=None,
-                        min_years=5, debug=False, join_col='STAID', geo_type='Polygon'):
-    """
-    Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
-    Use this to get e.g. irrigated area within a county, HUC, or state. This can mask based on Crop Data Layer,
-    and can mask data where the sum of irrigated years is less than min_years. This will output a .csv to
-    GCS wudr bucket.
-    :param debug:
-    :param join_col:
-    :param features:
-    :param bucket:
-    :param tables: vector data over which to take raster statistics
-    :param years: years over which to run the stats
-    :param description: export name append str
-    :param cdl_mask:
-    :param min_years:
-    :return:
-    """
+                        min_years=5, debug=False, join_col='STAID', geo_type='Polygon',
+                        gs_met=False):
     initialize()
-
+    missing_files = None
     if check_exists:
         l = open(f, 'r').readlines()
         missing_files = [ln.strip() for ln in l]
+        missing_files = [f.split('.')[0] for f in missing_files]
 
     fc = ee.FeatureCollection(tables)
     fc = fc.randomColumn('rand', seed=1234)
@@ -77,7 +63,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
     corb_clip = ee.FeatureCollection(CORB_CLIP)
     klamath_clip = ee.FeatureCollection(KLAMATH_CLIP)
 
-    eff_ppt_coll = ee.ImageCollection('users/dgketchum/expansion/naturalized_et')
+    eff_ppt_coll = ee.ImageCollection('users/dgketchum/expansion/ept')
     eff_ppt_coll = eff_ppt_coll.map(lambda x: x.rename('eff_ppt'))
 
     irr_coll = ee.ImageCollection(RF_ASSET)
@@ -117,7 +103,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
             et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb, et_klam]).mosaic()
             et = et_sum.mask(irr_mask)
 
-            eff_ppt = eff_ppt_coll.filterDate(s, e).select('eff_ppt').mosaic().multiply(0.00001)
+            eff_ppt = eff_ppt_coll.filterDate(s, e).select('eff_ppt').mosaic()
             eff_ppt = eff_ppt.mask(irr_mask).rename('eff_ppt')
 
             ppt, etr = extract_gridmet_monthly(yr, month)
@@ -145,8 +131,15 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
             if yr > 1986 and month in np.arange(4, 11):
                 bands = irr.addBands([et, cc, ppt, etr, eff_ppt, ietr])
                 select_ = [join_col, 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
+                if gs_met:
+                    if not 3 < month < 11:
+                        continue
+                    select_ = [join_col, 'ppt', 'etr']
+                    bands = ppt.addBands(etr)
 
             else:
+                if gs_met:
+                    continue
                 bands = ppt.addBands([etr])
                 select_ = [join_col, 'ppt', 'etr']
 
@@ -177,41 +170,30 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                 print(out_desc)
 
             elif geo_type == 'Point':
-
-                # sarr = np.linspace(0, 0.9, 10)
-                # earr = np.linspace(0.1, 1.0, 10)
-
                 for st in BASIN_STATES:
+                    if st == 'MT':
+                        continue
+                    st_points = fc.filterMetadata('STUSPS', 'equals', st)
+                    out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
 
-                    if yr == 2021 and month == 7 and st == 'ID':
+                    if check_exists and out_desc not in missing_files:
+                        continue
 
-                        st_points = fc.filterMetadata('STUSPS', 'equals', st)
+                    plot_sample_regions = bands.sampleRegions(
+                        collection=st_points,
+                        scale=30,
+                        tileScale=16)
 
-                        # for i, (s_, e_) in enumerate(zip(sarr, earr)):
-                        out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
+                    task = ee.batch.Export.table.toCloudStorage(
+                        plot_sample_regions,
+                        description=out_desc,
+                        bucket='wudr',
+                        fileNamePrefix=out_desc,
+                        fileFormat='CSV',
+                        selectors=select_)
 
-                        if check_exists:
-                            out_file = '{}.tfrecord.gz'.format(out_desc)
-                            if out_file not in missing_files:
-                                continue
-
-                        # rpts = st_points.filter(ee.Filter.gt('rand', s_))
-                        # rpts = rpts.filter(ee.Filter.lt('rand', e_))
-
-                        plot_sample_regions = bands.sampleRegions(
-                            collection=st_points,
-                            scale=30,
-                            tileScale=16)
-
-                        task = ee.batch.Export.table.toCloudStorage(
-                            plot_sample_regions,
-                            description=out_desc,
-                            bucket='wudr',
-                            fileNamePrefix=out_desc,
-                            fileFormat='TFRecord')
-
-                        ee_task_start(task)
-                        print(out_desc)
+                    ee_task_start(task)
+                    print(out_desc)
 
 
 def extract_corrected_etr(year, month):
@@ -247,8 +229,8 @@ if __name__ == '__main__':
     bucket = 'wudr'
     f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
     table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
-    years_ = list(range(1987, 2022))
+    years_ = list(range(1987, 2011))
     years_.reverse()
-    export_gridded_data(table_, bucket, years_, 'ietr_fields_13FEB2023', min_years=5,
+    export_gridded_data(table_, bucket, years_, 'ietr_fields_gsmet_13FEB2023', min_years=5, gs_met=True,
                         debug=False, join_col='OPENET_ID', geo_type='Point', check_exists=None)
 # ========================= EOF ================================================================================

@@ -1,11 +1,11 @@
 import os
 import json
+from itertools import product
 from pprint import pprint
 
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-from shapely.geometry import Point
+from scipy.stats import linregress as lr
 
 from call_ee import BASIN_STATES
 from climate_indices import compute, indices
@@ -28,19 +28,15 @@ def check_file_(_dir, state, glob):
     return files
 
 
-def concat_tfr(tfr_dir, metadata, out, subset='all', file_check=False, glob=None):
-    import pandas_tfrecords as pdtfr
-    m, y = None, None
-
+def concatenate_field_data(tfr_dir, metadata, out, subset='all', file_check=False, glob=None):
     for s in BASIN_STATES:
+        if s != 'CA':
+            continue
         mdata = os.path.join(metadata, '{}.csv'.format(s))
         df = pd.read_csv(mdata, index_col='OPENET_ID')
-        df = df[~df.index.duplicated()]
         df = df.sort_index()
         dt_range = ['{}-{}-01'.format(y, m) for y in range(1987, 2022) for m in range(1, 13)]
-        dt_ind = pd.DatetimeIndex(dt_range)
-        midx = pd.MultiIndex.from_product([df.index, dt_ind], names=['idx', 'dt'])
-        mdf = pd.DataFrame(index=midx, columns=COLS)
+        data = np.zeros((df.shape[0], len(dt_range), len(COLS)))
 
         print('\n', s)
 
@@ -51,58 +47,67 @@ def concat_tfr(tfr_dir, metadata, out, subset='all', file_check=False, glob=None
         else:
             pass
 
-        l = [os.path.join(tfr_dir, x) for x in os.listdir(tfr_dir) if s in x]
-        l.sort()
+        file_list = [os.path.join(tfr_dir, '{}_{}_{}_{}.csv'.format(glob, s, y, m))
+                     for y in range(1987, 2022)
+                     for m in range(1, 13)]
 
         if file_check:
             targets = check_file_(tfr_dir, s, glob=glob)
-            missing = [os.path.basename(f) for f in targets if f not in l]
+            missing = [os.path.basename(f) for f in targets if f not in file_list]
             print('missing {} files in {}'.format(len(missing), s))
             pprint([os.path.basename(f) for f in missing])
             open('missing.txt', 'a').write('\n'.join(missing) + '\n')
             continue
 
-        for csv in l:
-            try:
-                splt = csv.split('.')[0].split('_')
-                m, y = int(splt[-1]), int(splt[-2])
-                dt = pd.to_datetime('{}-{}-01'.format(y, m))
-                c = pdtfr.tfrecords_to_pandas(file_paths=csv)
-                c.index = c['OPENET_ID']
-                print(y, m, len(c.index))
-                c = c[['rand']]
-                match = [i for i in c.index if i in df.index]
-                df.loc[match, 'rand'] = c.loc[match, 'rand']
-                c = c[~c.index.duplicated()]
-                if not 3 < m < 11:
-                    c[['et', 'cc', 'eff_ppt', 'ietr']] = np.zeros((c.shape[0], 4))
-                c = c[COLS]
-                match_idx = [i for i in c.index if i in mdf.index]
-                mdf.loc[(match_idx, dt), c.columns] = c.loc[match_idx].values
+        for csv in file_list:
+            splt = csv.split('.')[0].split('_')
+            m, y = int(splt[-1]), int(splt[-2])
+            dt_ind = dt_range.index('{}-{}-01'.format(y, m))
+            c = pd.read_csv(csv)
+            c.index = c['OPENET_ID']
+            c = c.reindex(df.index)
+            if not 3 < m < 11:
+                c[['et', 'cc', 'eff_ppt', 'ietr']] = np.zeros((c.shape[0], 4))
+            c = c[COLS]
+            data[:, dt_ind, :] = c.values
 
-            except Exception as e:
-                print(e, csv, m, y)
-                continue
-
-        out_path = os.path.join(out, '{}.csv'.format(s))
+        out_path = os.path.join(out, '{}.npy'.format(s))
         if subset in ['usbr', 'nonusbr']:
-            out_path = os.path.join(out, '{}_{}.csv'.format(s, subset))
-        mdf.to_csv(out_path)
+            out_path = os.path.join(out, '{}_{}.npy'.format(s, subset))
+        data.tofile(out_path)
+        out_js = out_path.replace('.npy', '_index.json')
+        with open(out_js, 'w') as fp:
+            json.dump({'index': list(df.index)}, fp, indent=4)
+        print(out_path)
 
 
-def map_indices(csv, out_js):
-    df = pd.read_csv(csv, index_col=['idx', 'dt'])
-    df['kc'] = df['et'] / df['ietr']
-    simi = df.groupby(level=0).apply(lambda x: indices.spi(x.kc.values, scale=1, **IDX_KWARGS))
-    simi = np.stack(simi.values).flatten()
-    spei = df.groupby(level=0).apply(lambda x: indices.spei(x.ppt.values, x.etr.values, scale=11, **IDX_KWARGS))
-    spei = np.stack(spei.values).flatten()
-    resp_data = np.array([simi, spei]).T
-    df = pd.DataFrame(data=resp_data, columns=['simi', 'spei'], index=df.index)
-    dct = {level: df.xs(level).to_dict('index') for level in df.index.levels[0]}
-    with open(out_js, 'w') as f:
-        json.dump(dct, f, indent=4)
-        print(out_js)
+def map_indices(npy, out_js):
+    met_periods = list(range(1, 13)) + [18, 24, 30, 36]
+    ag_periods = list(range(1, 8))
+    periods = list(product(met_periods, ag_periods))
+
+    data = np.fromfile(npy, dtype=float)
+    js = npy.replace('.npy', '.json')
+
+    with open(js, 'r') as fp:
+        index = json.load(fp)['index']
+
+    data = data.reshape((len(index), -1, len(COLS)))
+    cols_ = ['{}_{}'.format(m, a) for m, a in periods]
+    df = pd.DataFrame(columns=cols_, index=index)
+
+    for met_p, ag_p in periods:
+        kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+        simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
+        cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
+        # uses locally modified climate_indices package that takes cwb = ppt - pet as input
+        spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=cwb, axis=1)
+        for i, ind in enumerate(index):
+            _simi, _spei, rng = simi[i, :], spei[i, :], np.arange(len(spei))
+            mask = ~np.isnan(np.array(_simi + _spei))
+            _simi, _spei, rng = _simi[mask], _spei[mask], rng[mask]
+            r = lr()
+            pass
 
 
 if __name__ == '__main__':
@@ -112,10 +117,10 @@ if __name__ == '__main__':
 
     tfr_ = '/media/nvm/field_pts/csv'
     out_ = '/media/nvm/field_pts/field_pts_data'
-    meta_ = '/media/nvm/field_pts/metadata/'
-    concat_tfr(tfr_, meta_, out_, subset='all', glob='ietr_fields_13FEB2023', file_check=False)
+    meta_ = '/media/nvm/field_pts/usbr_attr/'
+    # concatenate_field_data(tfr_, meta_, out_, subset='all', glob='ietr_fields_13FEB2023', file_check=False)
 
-    in_ = '/media/nvm/field_pts/field_pts_data/CO.csv'
-    out_ = '/media/nvm/field_pts/indices/CO.json'
-    # map_indices(in_, out_)
+    in_ = '/media/nvm/field_pts/field_pts_data/CA.npy'
+    out_ = '/media/nvm/field_pts/indices/CA.json'
+    map_indices(in_, out_)
 # ========================= EOF ====================================================================

@@ -58,9 +58,13 @@ def random_point(poly_dir, irr_cnt, out_rand):
 def state_csv(shape, out_dir):
     gdf = gpd.read_file(shape)
     for s in BASIN_STATES:
-        df = gdf[gdf['STUSPS'] == s]
+        df = gdf[gdf['STUSPS'] == s].copy()
+        df.loc[pd.isna(df['name']), 'name'] = 'none'
+        df.loc[pd.isna(df['usbrid']), 'usbrid'] = 0
+        df['usbrid'] = df['usbrid'].values.astype(np.int64)
+        df = df[['OPENET_ID', 'usbrid', 'name']]
         out_ = os.path.join(out_dir, '{}.csv'.format(s))
-        df.to_csv(out_)
+        df.to_csv(out_, index=False)
         print(out_, df.shape[0])
 
 
@@ -77,9 +81,12 @@ if __name__ == '__main__':
     out_randn = os.path.join(root, 'expansion', 'shapefiles', 'openet_field_centr_irr_gt19', 'state_openet_points',
                              'study_basins_openet_irr_randr_wKlamath_{}.shp')
 
-    random_point(poly_dir_, centr_dir, out_randn)
+    # random_point(poly_dir_, centr_dir, out_randn)
     #
-    # inshp = os.path.join(root, 'expansion/shapefiles/openet_field_centr_irr_gt19/field_pts_attr_8FEB2023.shp')
-    # odir = '/media/nvm/field_pts/metadata'
-    # state_csv(inshp, odir)
+    inshp = '/media/research/IrrigationGIS/expansion/shapefiles/openet_field_centr_irr_gt19/' \
+            'state_openet_points/field_null_attr_13FEB2023.shp'
+
+    odir = '/media/nvm/field_pts/usbr_attr'
+
+    state_csv(inshp, odir)
 # ========================= EOF ====================================================================
