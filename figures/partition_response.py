@@ -37,7 +37,7 @@ def partition_response(in_json, out_fig, month=10):
                         spei_d.append('Dry')
                         simi_d.append(sm)
                     area.append(area_)
-                    if len(simi_n + simi_d + simi_w) % 1000 == 0:
+                    if len(simi_n + simi_d + simi_w) % 10000 == 0:
                         print(len(simi_n + simi_d + simi_w))
             else:
                 continue
@@ -53,10 +53,10 @@ def partition_response(in_json, out_fig, month=10):
             c = pd.DataFrame(data=np.array([simi, spei, area]).T,
                              columns=['SIMI', 'SPEI', 'Management'])
             df = pd.concat([df, c])
-            df['SIMI'] = df['SIMI'].values.astype(float)
 
+    df['SIMI'] = df['SIMI'].values.astype(float)
     sns.violinplot(data=df, x='SPEI', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'])
-    plt.suptitle('Klamath Basin, CA Irrigation Management')
+    plt.suptitle('Colorado Irrigation Management')
     plt.savefig(out_fig)
 
 
@@ -65,8 +65,7 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    in_ = ['/media/nvm/field_pts/indices/CA_usbr.json',
-           '/media/nvm/field_pts/indices/CA_nonusbr.json']
-    out_ = os.path.join(root, 'figures', 'partitions', 'Klamath.png')
-    partition_response(in_, out_, month=10)
+    in_ = '/media/nvm/field_pts/indices/CO.json'
+    out_ = os.path.join(root, 'figures', 'partitions', 'Colorado.png')
+    partition_response(in_, out_, month=9)
 # ========================= EOF ====================================================================

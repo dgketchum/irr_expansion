@@ -43,7 +43,7 @@ def get_geomteries():
     return bozeman, navajo, test_point, western_us
 
 
-def export_gridded_data(tables, bucket, years, description, features=None,
+def export_gridded_data(tables, bucket, years, description, features=None, check_exists=None,
                         min_years=5, debug=False, join_col='STAID', geo_type='Polygon'):
     """
     Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
@@ -63,8 +63,12 @@ def export_gridded_data(tables, bucket, years, description, features=None,
     """
     initialize()
 
+    if check_exists:
+        l = open(f, 'r').readlines()
+        missing_files = [ln.strip() for ln in l]
+
     fc = ee.FeatureCollection(tables)
-    fc = fc.randomColumn('rand')
+    fc = fc.randomColumn('rand', seed=1234)
 
     if features:
         fc = fc.filter(ee.Filter.inList('STAID', features))
@@ -174,21 +178,28 @@ def export_gridded_data(tables, bucket, years, description, features=None,
 
             elif geo_type == 'Point':
 
-                sarr = np.linspace(0, 0.9, 10)
-                earr = np.linspace(0.1, 1.0, 10)
+                # sarr = np.linspace(0, 0.9, 10)
+                # earr = np.linspace(0.1, 1.0, 10)
 
                 for st in BASIN_STATES:
 
-                    st_points = fc.filterMetadata('STUSPS', 'equals', st)
+                    if yr == 2021 and month == 7 and st == 'ID':
 
-                    for i, (s_, e_) in enumerate(zip(sarr, earr)):
-                        rpts = st_points.filter(ee.Filter.gt('rand', s_))
-                        rpts = rpts.filter(ee.Filter.lt('rand', e_))
+                        st_points = fc.filterMetadata('STUSPS', 'equals', st)
 
-                        out_desc = '{}_{}_{}_{}_{}'.format(description, st, i, yr, month)
+                        # for i, (s_, e_) in enumerate(zip(sarr, earr)):
+                        out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
+
+                        if check_exists:
+                            out_file = '{}.tfrecord.gz'.format(out_desc)
+                            if out_file not in missing_files:
+                                continue
+
+                        # rpts = st_points.filter(ee.Filter.gt('rand', s_))
+                        # rpts = rpts.filter(ee.Filter.lt('rand', e_))
 
                         plot_sample_regions = bands.sampleRegions(
-                            collection=rpts,
+                            collection=st_points,
                             scale=30,
                             tileScale=16)
 
@@ -234,10 +245,10 @@ def initialize():
 
 if __name__ == '__main__':
     bucket = 'wudr'
-
-    table_ = 'users/dgketchum/expansion/points/field_pts_attr_8FEB2023'
+    f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
+    table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
     years_ = list(range(1987, 2022))
-    # years_.reverse()
-    export_gridded_data(table_, bucket, years_, 'ietr_fields_8FEB2023', min_years=5,
-                        debug=False, join_col='OPENET_ID', geo_type='Point')
+    years_.reverse()
+    export_gridded_data(table_, bucket, years_, 'ietr_fields_13FEB2023', min_years=5,
+                        debug=False, join_col='OPENET_ID', geo_type='Point', check_exists=None)
 # ========================= EOF ================================================================================
