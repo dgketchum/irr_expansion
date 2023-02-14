@@ -20,59 +20,74 @@ IDX_KWARGS = dict(distribution=indices.Distribution.gamma,
                   periodicity=compute.Periodicity.monthly)
 
 
-def concat_tfr(tfr_dir, metadata, out, subset='all'):
+def check_file_(_dir, state, glob):
+    fext = 'csv'
+    fstr = '{}_{}'.format(glob, state)
+    files = ['{}_{}_{}.{}'.format(fstr, y, m, fext) for y in range(1987, 2022) for m in range(1, 13)]
+    files = [os.path.join(_dir, f) for f in files]
+    return files
+
+
+def concat_tfr(tfr_dir, metadata, out, subset='all', file_check=False, glob=None):
     import pandas_tfrecords as pdtfr
+    m, y = None, None
 
     for s in BASIN_STATES:
         mdata = os.path.join(metadata, '{}.csv'.format(s))
         df = pd.read_csv(mdata, index_col='OPENET_ID')
         df = df[~df.index.duplicated()]
         df = df.sort_index()
-        dt_range = ['{}-{}-01'.format(y, m) for y in range(1987, 1988) for m in range(1, 2)]
+        dt_range = ['{}-{}-01'.format(y, m) for y in range(1987, 2022) for m in range(1, 13)]
         dt_ind = pd.DatetimeIndex(dt_range)
         midx = pd.MultiIndex.from_product([df.index, dt_ind], names=['idx', 'dt'])
         mdf = pd.DataFrame(index=midx, columns=COLS)
 
-        for r in range(10):
-            print('\n', s, r)
+        print('\n', s)
 
-            if subset == 'usbr':
-                df = df[df['usbrid'] > 0]
-            elif subset == 'nonusbr':
-                df = df[df['usbrid'] == 0]
-            else:
-                pass
+        if subset == 'usbr':
+            df = df[df['usbrid'] > 0]
+        elif subset == 'nonusbr':
+            df = df[df['usbrid'] == 0]
+        else:
+            pass
 
-            glb = '{}_{}'.format(s, r)
-            l = [os.path.join(tfr_dir, x) for x in os.listdir(tfr_dir) if glb in x]
-            l.sort()
+        l = [os.path.join(tfr_dir, x) for x in os.listdir(tfr_dir) if s in x]
+        l.sort()
 
-            for tfr in l[:1]:
-                try:
-                    splt = tfr.split('.')[0].split('_')
-                    m, y = int(splt[-1]), int(splt[-2])
-                    dt = pd.to_datetime('{}-{}-01'.format(y, m))
-                    c = pdtfr.tfrecords_to_pandas(file_paths=tfr)
-                    c.index = c['OPENET_ID']
-                    print(y, m, len(c.index))
-                    c = c[['rand']]
-                    match = [i for i in c.index if i in df.index]
-                    df.loc[match, 'rand'] = c.loc[match, 'rand']
-                    c = c[~c.index.duplicated()]
-                    if not 3 < m < 11:
-                        c[['et', 'cc', 'eff_ppt', 'ietr']] = np.zeros((c.shape[0], 4))
-                    c = c[COLS]
-                    match_idx = [i for i in c.index if i in mdf.index]
-                    mdf.loc[(match_idx, dt), c.columns] = c.loc[match_idx].values
+        if file_check:
+            targets = check_file_(tfr_dir, s, glob=glob)
+            missing = [os.path.basename(f) for f in targets if f not in l]
+            print('missing {} files in {}'.format(len(missing), s))
+            pprint([os.path.basename(f) for f in missing])
+            open('missing.txt', 'a').write('\n'.join(missing) + '\n')
+            continue
 
-                except Exception as e:
-                    print(e, tfr, m, y)
-                    continue
+        for csv in l:
+            try:
+                splt = csv.split('.')[0].split('_')
+                m, y = int(splt[-1]), int(splt[-2])
+                dt = pd.to_datetime('{}-{}-01'.format(y, m))
+                c = pdtfr.tfrecords_to_pandas(file_paths=csv)
+                c.index = c['OPENET_ID']
+                print(y, m, len(c.index))
+                c = c[['rand']]
+                match = [i for i in c.index if i in df.index]
+                df.loc[match, 'rand'] = c.loc[match, 'rand']
+                c = c[~c.index.duplicated()]
+                if not 3 < m < 11:
+                    c[['et', 'cc', 'eff_ppt', 'ietr']] = np.zeros((c.shape[0], 4))
+                c = c[COLS]
+                match_idx = [i for i in c.index if i in mdf.index]
+                mdf.loc[(match_idx, dt), c.columns] = c.loc[match_idx].values
 
-            out_path = os.path.join(out, '{}.csv'.format(s))
-            if subset in ['usbr', 'nonusbr']:
-                out_path = os.path.join(out, '{}_{}.csv'.format(s, subset))
-            mdf.to_csv(out_path)
+            except Exception as e:
+                print(e, csv, m, y)
+                continue
+
+        out_path = os.path.join(out, '{}.csv'.format(s))
+        if subset in ['usbr', 'nonusbr']:
+            out_path = os.path.join(out, '{}_{}.csv'.format(s, subset))
+        mdf.to_csv(out_path)
 
 
 def map_indices(csv, out_js):
@@ -95,10 +110,10 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    tfr_ = '/media/nvm/field_pts/tfr'
+    tfr_ = '/media/nvm/field_pts/csv'
     out_ = '/media/nvm/field_pts/field_pts_data'
     meta_ = '/media/nvm/field_pts/metadata/'
-    concat_tfr(tfr_, meta_, out_, subset='all')
+    concat_tfr(tfr_, meta_, out_, subset='all', glob='ietr_fields_13FEB2023', file_check=False)
 
     in_ = '/media/nvm/field_pts/field_pts_data/CO.csv'
     out_ = '/media/nvm/field_pts/indices/CO.json'
