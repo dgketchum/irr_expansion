@@ -52,6 +52,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
         l = open(f, 'r').readlines()
         missing_files = [ln.strip() for ln in l]
         missing_files = [f.split('.')[0] for f in missing_files]
+        missing_files = [os.path.basename(f) for f in missing_files]
 
     fc = ee.FeatureCollection(tables)
     fc = fc.randomColumn('rand', seed=1234)
@@ -128,18 +129,14 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
             etr = etr.multiply(area).rename('etr')
             ietr = ietr.multiply(area).rename('ietr')
 
-            if yr > 1986 and month in np.arange(4, 11):
+            if yr > 1986 and month in range(4, 11):
                 bands = irr.addBands([et, cc, ppt, etr, eff_ppt, ietr])
                 select_ = [join_col, 'irr', 'et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
                 if gs_met:
-                    if not 3 < month < 11:
-                        continue
                     select_ = [join_col, 'ppt', 'etr']
                     bands = ppt.addBands(etr)
 
             else:
-                if gs_met:
-                    continue
                 bands = ppt.addBands([etr])
                 select_ = [join_col, 'ppt', 'etr']
 
@@ -171,8 +168,6 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
 
             elif geo_type == 'Point':
                 for st in BASIN_STATES:
-                    if st == 'MT':
-                        continue
                     st_points = fc.filterMetadata('STUSPS', 'equals', st)
                     out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
 
@@ -229,8 +224,8 @@ if __name__ == '__main__':
     bucket = 'wudr'
     f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
     table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
-    years_ = list(range(1987, 2011))
-    years_.reverse()
-    export_gridded_data(table_, bucket, years_, 'ietr_fields_gsmet_13FEB2023', min_years=5, gs_met=True,
-                        debug=False, join_col='OPENET_ID', geo_type='Point', check_exists=None)
+    years_ = list(range(1984, 1987))
+    # years_.reverse()
+    export_gridded_data(table_, bucket, years_, 'ietr_fields_13FEB2023', min_years=5, gs_met=True,
+                        debug=False, join_col='OPENET_ID', geo_type='Point', check_exists=False)
 # ========================= EOF ================================================================================
