@@ -2,11 +2,10 @@ import os
 import json
 from itertools import product
 from pprint import pprint
+from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr
-from scipy.signal import correlate
 
 from call_ee import BASIN_STATES
 from climate_indices import compute, indices
@@ -71,66 +70,71 @@ def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None):
         print(out_path)
 
 
-def map_indices(npy_d, out_dir):
+def write_indices(arg):
+    state, id_, od = arg
+    met_periods = list(range(1, 13)) + [18, 24, 30, 36]
+    ag_periods = list(range(1, 8))
+    periods = list(product(met_periods, ag_periods))
 
-    for s in BASIN_STATES:
+    npy = os.path.join(id_, '{}.npy'.format(state))
+    print(npy)
+    js = npy.replace('.npy', '_index.json')
+    data = np.fromfile(npy, dtype=float)
 
-        if s != 'CA':
-            continue
+    with open(js, 'r') as fp:
+        index = json.load(fp)['index']
 
-        met_periods = list(range(1, 13)) + [18, 24, 30, 36]
-        ag_periods = list(range(1, 8))
-        periods = list(product(met_periods, ag_periods))
+    data = data.reshape((len(index), -1, len(COLS)))
+    df = pd.DataFrame(index=index)
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1987, 2022) for m in range(1, 13)]
+    months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
 
-        npy = os.path.join(npy_d, '{}.npy'.format(s))
-        js = npy.replace('.npy', '.json')
-        data = np.fromfile(npy, dtype=float)
+    for met_p, ag_p in periods:
 
-        with open(js, 'r') as fp:
-            index = json.load(fp)['index']
+        kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+        simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
 
-        data = data.reshape((len(index), -1, len(COLS)))
-        df = pd.DataFrame(index=index)
-        dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1987, 2022) for m in range(1, 13)]
-        months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
+        # uses locally modified climate_indices package that takes cwb = ppt - pet as input
+        cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
+        spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=cwb, axis=1)
 
-        for met_p, ag_p in periods:
+        stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months])
 
-            kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
-            simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
+        for m in range(4, 11):
+            if m - ag_p < 3:
+                continue
+            d = stack[:, stack[2] == float(m)].reshape((3, len(index), -1))
+            mx = np.ma.masked_array(np.repeat(np.isnan(d[:1, :, :]), 3, axis=0))
+            d = np.ma.MaskedArray(d, mx)
+            coref = [np.ma.corrcoef(d[0, i, :], d[1, i, :])[0][1].item() ** 2 for i in range(d.shape[1])]
+            col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, m)
+            df[col] = coref
+            print(state, col)
 
-            # uses locally modified climate_indices package that takes cwb = ppt - pet as input
-            cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
-            spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=cwb, axis=1)
+    ofile = os.path.join(od, '{}.csv'.format(state))
+    df.to_csv(ofile)
+    return ofile
 
-            stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months])
 
-            for m in range(4, 11):
-                if m - ag_p < 3:
-                    continue
-                d = stack[:, stack[2] == float(m)].reshape((3, len(index), -1))
-                mx = np.ma.masked_array(np.repeat(np.isnan(d[:1, :, :]), 3, axis=0))
-                d = np.ma.MaskedArray(d, mx)
-                coref = [np.ma.corrcoef(d[0, i, :], d[1, i, :])[0][1].item() ** 2 for i in range(d.shape[1])]
-                col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, m)
-                df[col] = coref
-                print(s, col)
-
-        ofile = os.path.join(out_dir, '{}.csv'.format(s))
-        df.to_csv(ofile)
+def main():
+    args = [(s, fpd, ind_) for s in BASIN_STATES]
+    with Pool(processes=11) as pool:
+        result = pool.map(write_indices, args)
+        pool.close()
+        pool.join()
+        print(result)
 
 
 if __name__ == '__main__':
-    root = '/media/research/IrrigationGIS/expansion'
+    root = '/media/nvm'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS/expansion'
+        root = '/home/dgketchum/data'
 
-    csv_ = '/media/nvm/field_pts/csv'
-    fpd = '/media/nvm/field_pts/field_pts_data'
-    meta_ = '/media/nvm/field_pts/usbr_attr/'
+    csv_ = os.path.join(root, 'field_pts/csv')
+    fpd = os.path.join(root, 'field_pts/field_pts_data')
+    meta_ = os.path.join(root, 'field_pts/usbr_attr/')
     # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_13FEB2023', file_check=False)
 
-    ind_ = '/media/nvm/field_pts/indices'
-    map_indices(fpd, ind_)
-
+    ind_ = os.path.join(root, 'field_pts/indices')
+    main()
 # ========================= EOF ====================================================================
