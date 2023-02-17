@@ -6,7 +6,7 @@ from subprocess import check_call, Popen, PIPE
 
 import ee
 
-from call_ee import is_authorized
+from call_ee import is_authorized, BASIN_STATES
 
 home = os.path.expanduser('~')
 conda = os.path.join(home, 'miniconda3', 'envs')
@@ -69,7 +69,7 @@ def push_bands_to_asset(_dir, asset_folder, glob, bucket):
         check_call(cmd)
 
 
-def push_points_to_asset(_dir, state, bucket):
+def push_shapes_to_asset(_dir, state, bucket):
     local_files = [os.path.join(_dir, '{}.{}'.format(state, ext)) for ext in
                    ['shp', 'prj', 'shx', 'dbf']]
     bucket = os.path.join(bucket, 'openet_field_centroids')
@@ -80,7 +80,7 @@ def push_points_to_asset(_dir, state, bucket):
         check_call(cmd)
 
     asset_id = os.path.basename(bucket_files[0]).split('.')[0]
-    ee_dst = 'users/dgketchum/openet/field_centroids/{}'.format(asset_id)
+    ee_dst = 'users/dgketchum/expansion/fields/{}'.format(asset_id)
     cmd = [EE, 'upload', 'table', '-f', '--asset_id={}'.format(ee_dst), bucket_files[0]]
     check_call(cmd)
     print(asset_id, bucket_files[0])
@@ -171,14 +171,8 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    d = '/media/nvm/ept/full_stack_pred'
-    af = 'users/dgketchum/expansion/ept'
-    glob = 'ept_image_full_stack'
-    bucket_ = 'gs://wudr'
-    # push_images_to_asset(d, af, glob, bucket_)
-
-    l = list_assets(af)
-    for f in l:
-        set_time_metadata(f)
+    shp_ = '/media/nvm/field_pts/fields'
+    for s in BASIN_STATES:
+        push_shapes_to_asset(shp_, s, _bucket)
 
 # ========================= EOF ====================================================================

@@ -35,7 +35,7 @@ NLCD_UNCULT = [31,
 STATICS = ['aspect', 'awc', 'clay', 'ksat', 'lat', 'lon', 'sand', 'slope', 'tpi_1250', 'tpi_150', 'tpi_250']
 
 
-def join_csv_shapefile(in_shp, csv, out_shape, join_feat='OPENET_ID'):
+def join_csv_shapefile(in_shp, csv, out_shape, join_feat='OPENET_ID', find='uncult'):
     gdf = gpd.read_file(in_shp)
     gdf.index = gdf[join_feat]
     gdf.drop(columns=[join_feat], inplace=True)
@@ -55,10 +55,11 @@ def join_csv_shapefile(in_shp, csv, out_shape, join_feat='OPENET_ID'):
     gdf = gdf.loc[df.index]
     cols = list(df.columns)
     gdf[cols] = df[cols]
-    gdf = gdf[gdf['slope'] < 8]
-    gdf = gdf[gdf['nlcd'].apply(lambda x: True if x in NLCD_UNCULT else False)]
-    gdf = gdf[gdf['cdl'].apply(lambda x: True if x in UNCULT_CDL else False)]
-    gdf = gdf[gdf['uncult'].apply(lambda x: True if x >= 30 else False)]
+    if find == 'uncult':
+        gdf = gdf[gdf['slope'] < 8]
+        gdf = gdf[gdf['nlcd'].apply(lambda x: True if x in NLCD_UNCULT else False)]
+        gdf = gdf[gdf['cdl'].apply(lambda x: True if x in UNCULT_CDL else False)]
+        gdf = gdf[gdf['uncult'].apply(lambda x: True if x >= 30 else False)]
     gdf.to_file(out_shape)
     print(out_shape)
 

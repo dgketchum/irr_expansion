@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from calendar import monthrange
 
 import numpy as np
@@ -45,7 +46,7 @@ def get_geomteries():
 
 def export_gridded_data(tables, bucket, years, description, features=None, check_exists=None,
                         min_years=5, debug=False, join_col='STAID', geo_type='Polygon',
-                        gs_met=False):
+                        gs_met=False, masks=True, volumes=True):
     initialize()
     missing_files = None
     if check_exists:
@@ -79,7 +80,6 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
 
             irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
-            irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
 
             annual_coll = ee.ImageCollection('users/dgketchum/ssebop/cmbrb').merge(
                 ee.ImageCollection('users/hoylmanecohydro2/ssebop/cmbrb'))
@@ -102,32 +102,39 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
             et_umrb = et_coll.sum().multiply(0.00001).clip(umrb_clip.geometry())
 
             et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb, et_klam]).mosaic()
-            et = et_sum.mask(irr_mask)
-
             eff_ppt = eff_ppt_coll.filterDate(s, e).select('eff_ppt').mosaic()
-            eff_ppt = eff_ppt.mask(irr_mask).rename('eff_ppt')
 
             ppt, etr = extract_gridmet_monthly(yr, month)
             ietr = extract_corrected_etr(yr, month)
-            ietr = ietr.mask(irr_mask)
-
-            irr_mask = irr_mask.reproject(crs='EPSG:5070', scale=30)
-            et = et.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
-            eff_ppt = eff_ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
-            ppt = ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
-            etr = etr.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
-            ietr = ietr.reproject(crs='EPSG:5070', scale=30).resample('bilinear')
-
-            cc = et.subtract(eff_ppt)
 
             area = ee.Image.pixelArea()
-            irr = irr_mask.multiply(area).rename('irr')
-            et = et.multiply(area).rename('et')
-            eff_ppt = eff_ppt.multiply(area).rename('eff_ppt')
-            cc = cc.multiply(area).rename('cc')
-            ppt = ppt.multiply(area).rename('ppt')
-            etr = etr.multiply(area).rename('etr')
-            ietr = ietr.multiply(area).rename('ietr')
+
+            if masks:
+                irr_mask = irr_min_yr_mask.updateMask(irr.lt(1))
+                et = et_sum.mask(irr_mask)
+                eff_ppt = eff_ppt.mask(irr_mask).rename('eff_ppt')
+                ietr = ietr.mask(irr_mask)
+                irr_mask = irr_mask.reproject(crs='EPSG:5070', scale=30)
+                irr = irr_mask.multiply(area).rename('irr')
+            else:
+                irr = irr.lt(1).rename('irr')
+                et = et_sum
+
+            et = et.reproject(crs='EPSG:5070', scale=30).resample('bilinear').rename('et')
+            eff_ppt = eff_ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear').rename('eff_ppt')
+            ppt = ppt.reproject(crs='EPSG:5070', scale=30).resample('bilinear').rename('ppt')
+            etr = etr.reproject(crs='EPSG:5070', scale=30).resample('bilinear').rename('etr')
+            ietr = ietr.reproject(crs='EPSG:5070', scale=30).resample('bilinear').rename('ietr')
+
+            cc = et.subtract(eff_ppt).rename('cc')
+
+            if volumes:
+                et = et.multiply(area)
+                eff_ppt = eff_ppt.multiply(area)
+                cc = cc.multiply(area)
+                ppt = ppt.multiply(area)
+                etr = etr.multiply(area)
+                ietr = ietr.multiply(area)
 
             if yr > 1986 and month in range(4, 11):
                 bands = irr.addBands([et, cc, ppt, etr, eff_ppt, ietr])
@@ -147,24 +154,41 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                 p = pt.first().getInfo()['properties']
                 print('propeteries {}'.format(p))
 
-            out_desc = '{}_{}_{}'.format(description, yr, month)
-
             if geo_type == 'Polygon':
 
-                data = bands.reduceRegions(collection=fc,
-                                           reducer=ee.Reducer.sum(),
-                                           scale=30)
+                select_.append('MGRS_TILE')
 
-                task = ee.batch.Export.table.toCloudStorage(
-                    data,
-                    description=out_desc,
-                    bucket=bucket,
-                    fileNamePrefix=out_desc,
-                    fileFormat='CSV',
-                    selectors=select_)
+                with open('field_points/tiles.json', 'r') as f_obj:
+                    tiles = json.load(f_obj)
 
-                task.start()
-                print(out_desc)
+                for st in ['CA', 'CO', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
+
+                    fc = ee.FeatureCollection(os.path.join(tables, st))
+
+                    for tile in tiles[st]:
+
+                        # if st != 'CA' or tile != '10TFM' or month != 7:
+                        #     continue
+
+                        tile_pts = fc.filterMetadata('MGRS_TILE', 'equals', tile)
+                        out_desc = '{}_{}_{}_{}_{}'.format(description, st, tile, yr, month)
+
+                        data = bands.reduceRegions(collection=tile_pts,
+                                                   reducer=ee.Reducer.mean(),
+                                                   scale=30)
+
+                        # debug = data.filterMetadata('OPENET_ID', 'equals', 'CA_286046').first().getInfo()
+
+                        task = ee.batch.Export.table.toCloudStorage(
+                            data,
+                            description=out_desc,
+                            bucket=bucket,
+                            fileNamePrefix=out_desc,
+                            fileFormat='CSV',
+                            selectors=select_)
+
+                        task.start()
+                        print(out_desc)
 
             elif geo_type == 'Point':
                 for st in BASIN_STATES:
@@ -223,9 +247,11 @@ def initialize():
 if __name__ == '__main__':
     bucket = 'wudr'
     f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
-    table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
-    years_ = list(range(1984, 1987))
-    # years_.reverse()
-    export_gridded_data(table_, bucket, years_, 'ietr_fields_13FEB2023', min_years=5, gs_met=True,
-                        debug=False, join_col='OPENET_ID', geo_type='Point', check_exists=False)
+    # table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
+    table_ = 'users/dgketchum/expansion/fields'
+    years_ = list(range(1984, 2022))
+    years_.reverse()
+    export_gridded_data(table_, bucket, years_, 'ietr_fields_16FEB2023', min_years=5, gs_met=False,
+                        debug=False, join_col='OPENET_ID', geo_type='Polygon', check_exists=False,
+                        volumes=False, masks=False)
 # ========================= EOF ================================================================================

@@ -21,7 +21,7 @@ IDX_KWARGS = dict(distribution=indices.Distribution.gamma,
 
 
 def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None):
-    for s in BASIN_STATES:
+    for s in ['CA']:
         mdata = os.path.join(metadata, '{}.csv'.format(s))
         df = pd.read_csv(mdata, index_col='OPENET_ID')
         df = df.sort_index()
@@ -91,7 +91,12 @@ def write_indices(arg):
 
     for met_p, ag_p in periods:
 
-        kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+        if met_p != 11 or ag_p != 5:
+            continue
+
+        # kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+        kc = data[:, :, COLS.index('cc')]
+        kc[kc < 0.] = 0.
         simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
 
         # uses locally modified climate_indices package that takes cwb = ppt - pet as input
@@ -101,6 +106,8 @@ def write_indices(arg):
         stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months])
 
         for m in range(4, 11):
+            if m != 10:
+                continue
             if m - ag_p < 3:
                 continue
             d = stack[:, stack[2] == float(m)].reshape((3, len(index), -1))
@@ -111,14 +118,14 @@ def write_indices(arg):
             df[col] = coref
             print(state, col)
 
-    ofile = os.path.join(od, '{}.csv'.format(state))
+    ofile = os.path.join(od, '{}_scui.csv'.format(state))
     df.to_csv(ofile)
     return ofile
 
 
 def main():
-    args = [(s, fpd, ind_) for s in BASIN_STATES]
-    with Pool(processes=11) as pool:
+    args = [(s, fpd, ind_) for s in BASIN_STATES[2:]]
+    with Pool(processes=7) as pool:
         result = pool.map(write_indices, args)
         pool.close()
         pool.join()
@@ -133,8 +140,9 @@ if __name__ == '__main__':
     csv_ = os.path.join(root, 'field_pts/csv')
     fpd = os.path.join(root, 'field_pts/field_pts_data')
     meta_ = os.path.join(root, 'field_pts/usbr_attr/')
-    # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_13FEB2023', file_check=False)
+    concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_13FEB2023', file_check=False)
 
     ind_ = os.path.join(root, 'field_pts/indices')
-    main()
+    # main()
+    # write_indices(('WY', fpd, ind_))
 # ========================= EOF ====================================================================

@@ -35,40 +35,50 @@ PROPS = sorted(
 SUBPROPS = ['aspect', 'elevation', 'slope']
 
 
-def get_uncultivated_points(tables, file_prefix):
+def get_points_cultivation_data(state, tables, file_prefix, target='uncult', join_col='id', extra=True):
     fc = ee.FeatureCollection(tables)
+    fc = fc.filterBounds(ee.FeatureCollection('users/dgketchum/expansion/study_area_klamath').geometry())
     irr_coll = ee.ImageCollection(RF_ASSET)
 
-    for st in BASIN_STATES:
-        coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
+    coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
+
+    if target == 'uncult':
         remap = coll.map(lambda img: img.eq(2))
-        remap = remap.sum().rename('uncult')
+        bands = remap.sum().rename('uncult')
+    elif target == 'irr':
+        remap = coll.map(lambda img: img.eq(0))
+        bands = remap.sum().rename('irr')
+    else:
+        raise NotImplementedError
+
+    selectors_ = [join_col, target]
+
+    if extra:
         nlcd = ee.ImageCollection('USGS/NLCD_RELEASES/2019_REL/NLCD').select('landcover').first().rename('nlcd')
         cdl_cult, cdl_crop, cdl_simple = get_cdl(2020)
         cdl_crop = cdl_crop.rename('cdl')
         ned = ee.Image('USGS/NED')
         coords = ee.Image.pixelLonLat().rename(['lon', 'lat'])
         slope = ee.Terrain.products(ned).select('slope')
-        bands = remap.addBands([cdl_crop, nlcd, slope, coords])
+        bands = bands.addBands([cdl_crop, nlcd, slope, coords])
+        selectors_ = [join_col, target, 'cdl', 'nlcd', 'slope']
 
-        st_points = fc.filterMetadata('STUSPS', 'equals', st)
+    plot_sample_regions = bands.sampleRegions(
+        collection=fc,
+        scale=30,
+        tileScale=16)
 
-        plot_sample_regions = bands.sampleRegions(
-            collection=st_points,
-            scale=30,
-            tileScale=16)
+    desc = '{}_{}'.format(state, file_prefix)
+    task = ee.batch.Export.table.toCloudStorage(
+        plot_sample_regions,
+        description=desc,
+        selectors=selectors_,
+        bucket='wudr',
+        fileNamePrefix=desc,
+        fileFormat='CSV')
 
-        desc = '{}_{}'.format(st, file_prefix)
-        task = ee.batch.Export.table.toCloudStorage(
-            plot_sample_regions,
-            description=desc,
-            selectors=['id', 'uncult', 'cdl', 'nlcd', 'slope'],
-            bucket='wudr',
-            fileNamePrefix=desc,
-            fileFormat='CSV')
-
-        print(desc)
-        task.start()
+    print(desc)
+    task.start()
 
 
 def get_geomteries():
@@ -436,13 +446,15 @@ def ee_task_start(task, n=6):
 if __name__ == '__main__':
     is_authorized()
 
-    pts = 'users/dgketchum/expansion/points/uncult_add_2FEB2023'
-    # get_uncultivated_points(pts, 'uncult_add_2FEB2023')
+    pts = 'users/dgketchum/openet/field_centroids'
+    for s in BASIN_STATES:
+        layer = os.path.join(pts, s)
+        get_points_cultivation_data(s, layer, 'openet_centr_16FEB2023', target='irr', join_col='OPENET_ID', extra=False)
 
     points_ = 'users/dgketchum/expansion/points/points_nonforest_2FEB2023'
     bucket = 'wudr'
     years_ = [x for x in range(1987, 2022)]
     clip = 'users/dgketchum/expansion/study_area_klamath'
-    request_band_extract('bands_2FEB2023', points_, clip, years_, 30, clamp_et=True)
+    # request_band_extract('bands_2FEB2023', points_, clip, years_, 30, clamp_et=True)
 
 # ========================= EOF ====================================================================
