@@ -59,6 +59,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
 
     if features:
         fc = fc.filter(ee.Filter.inList('STAID', features))
+
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
     corb_clip = ee.FeatureCollection(CORB_CLIP)
@@ -153,7 +154,26 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                 p = pt.first().getInfo()['properties']
                 print('propeteries {}'.format(p))
 
-            if geo_type == 'Polygon':
+            if geo_type in ['huc', 'basin']:
+                assert masks
+                assert volumes
+
+                data = bands.reduceRegions(collection=fc,
+                                           reducer=ee.Reducer.sum(),
+                                           scale=30)
+
+                out_desc = '{}_{}_{}'.format(description, yr, month)
+                task = ee.batch.Export.table.toCloudStorage(
+                    data,
+                    description=out_desc,
+                    bucket=bucket,
+                    fileNamePrefix=out_desc,
+                    fileFormat='CSV',
+                    selectors=select_)
+                ee_task_start(task)
+                print(out_desc)
+
+            if geo_type == 'fields':
 
                 select_.append('MGRS_TILE')
 
@@ -189,7 +209,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                         ee_task_start(task)
                         print(out_desc)
 
-            elif geo_type == 'Point':
+            elif geo_type == 'points':
                 for st in BASIN_STATES:
                     st_points = fc.filterMetadata('STUSPS', 'equals', st)
                     out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
@@ -245,11 +265,21 @@ def initialize():
 
 if __name__ == '__main__':
     bucket = 'wudr'
-    f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
-    # table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
-    table_ = 'users/dgketchum/expansion/fields'
     years_ = list(range(1984, 2022))
+    years_.reverse()
+
+    basins = 'users/dgketchum/gages/gage_basins'
+    export_gridded_data(basins, bucket, years_, 'ietr_basins_21FEB2023', min_years=5, gs_met=False,
+                        join_col='STAID', geo_type='basin', volumes=True, masks=True)
+
+    huc = 'users/dgketchum/boundaries/huc8_study'
+    export_gridded_data(huc, bucket, years_, 'ietr_huc8_21FEB2023', min_years=5, gs_met=False,
+                        join_col='huc8', geo_type='huc', volumes=True, masks=True)
+
+    f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
+    table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
+    table_ = 'users/dgketchum/expansion/fields'
     export_gridded_data(table_, bucket, years_, 'ietr_fields_16FEB2023', min_years=5, gs_met=False,
-                        debug=False, join_col='OPENET_ID', geo_type='Polygon', check_exists=f,
+                        debug=False, join_col='OPENET_ID', geo_type='fields', check_exists=f,
                         volumes=False, masks=False)
 # ========================= EOF ================================================================================
