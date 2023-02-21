@@ -52,8 +52,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
     if check_exists:
         l = open(f, 'r').readlines()
         missing_files = [ln.strip() for ln in l]
-        missing_files = [f.split('.')[0] for f in missing_files]
-        missing_files = [os.path.basename(f) for f in missing_files]
+        missing_files = [os.path.basename(f_) for f_ in missing_files]
 
     fc = ee.FeatureCollection(tables)
     fc = fc.randomColumn('rand', seed=1234)
@@ -161,17 +160,17 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                 with open('field_points/tiles.json', 'r') as f_obj:
                     tiles = json.load(f_obj)
 
-                for st in ['CA', 'CO', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
+                for st in ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
 
                     fc = ee.FeatureCollection(os.path.join(tables, st))
 
                     for tile in tiles[st]:
 
-                        # if st != 'CA' or tile != '10TFM' or month != 7:
-                        #     continue
-
                         tile_pts = fc.filterMetadata('MGRS_TILE', 'equals', tile)
                         out_desc = '{}_{}_{}_{}_{}'.format(description, st, tile, yr, month)
+
+                        if check_exists and out_desc not in missing_files:
+                            continue
 
                         data = bands.reduceRegions(collection=tile_pts,
                                                    reducer=ee.Reducer.mean(),
@@ -187,7 +186,7 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                             fileFormat='CSV',
                             selectors=select_)
 
-                        task.start()
+                        ee_task_start(task)
                         print(out_desc)
 
             elif geo_type == 'Point':
@@ -250,8 +249,7 @@ if __name__ == '__main__':
     # table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
     table_ = 'users/dgketchum/expansion/fields'
     years_ = list(range(1984, 2022))
-    years_.reverse()
     export_gridded_data(table_, bucket, years_, 'ietr_fields_16FEB2023', min_years=5, gs_met=False,
-                        debug=False, join_col='OPENET_ID', geo_type='Polygon', check_exists=False,
+                        debug=False, join_col='OPENET_ID', geo_type='Polygon', check_exists=f,
                         volumes=False, masks=False)
 # ========================= EOF ================================================================================
