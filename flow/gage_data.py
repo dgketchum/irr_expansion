@@ -190,12 +190,12 @@ def consecutive_subseq(iterable, length):
 
 
 if __name__ == '__main__':
-    root = '/media/research/IrrigationGIS'
+    root = '/media/research/IrrigationGIS/expansion'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
+        root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
     gages_metadata = os.path.join(root, 'gages', 'irrigated_gage_metadata.json')
-    figures = os.path.join(root, '../figures')
+    figures = os.path.join(root, 'figures')
 
     daily_q = os.path.join(root, 'tables', 'hydrographs', 'daily_q')
     daily_q_fig = os.path.join(figures, 'hydrographs', 'daily_hydrograph_plots')
@@ -203,11 +203,11 @@ if __name__ == '__main__':
     monthly_q = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
     monthly_q_fig = os.path.join(figures, 'hydrographs', 'monthly_hydrograph_plots')
 
-    start_yr, end_yr = 1987, 2021
+    start_yr, end_yr = 1984, 2021
     months = list(range(1, 13))
-    # get_station_daily_data('{}-01-01'.format(start_yr), '{}-12-31'.format(end_yr), gages_metadata,
-    #                        daily_q, plot_dir=daily_q_fig, overwrite=False)
-    # get_station_daterange_data(daily_q, monthly_q, convert_to_mcube=True, resample_freq='M', plot_dir=monthly_q_fig)
+    get_station_daily_data('{}-01-01'.format(start_yr), '{}-12-31'.format(end_yr), gages_metadata,
+                           daily_q, plot_dir=daily_q_fig, overwrite=True)
+    get_station_daterange_data(daily_q, monthly_q, convert_to_mcube=True, resample_freq='M', plot_dir=monthly_q_fig)
 
     d = os.path.join(root, 'expansion')
     data_ = os.path.join(d, 'irrigated_gage_metadata.json')
@@ -216,6 +216,6 @@ if __name__ == '__main__':
     data_tables = os.path.join(root, 'impacts', 'tables',
                                'input_flow_climate_tables',
                                'IrrMapperComp_21OCT2022')
-    find_lowest_flows(_points, data_tables, _shape_out)
+    # find_lowest_flows(_points, data_tables, _shape_out)
 
 # ========================= EOF ====================================================================
