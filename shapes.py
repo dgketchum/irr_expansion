@@ -7,6 +7,8 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 
+from field_points.itype_mapping import itype
+
 BASIN_STATES = ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 
@@ -37,7 +39,7 @@ def generate_random(polygon):
 def random_point(poly_dir, irr_cnt, out_rand):
     c = gpd.read_file(irr_cnt)
     c['STATE'] = c['OPENET_ID'].apply(lambda x: x[:2])
-    for s in BASIN_STATES[2:]:
+    for s in BASIN_STATES:
         d = c[c['STATE'] == s].copy()
         print(s, d.shape[0])
         ids = d['OPENET_ID'].values
@@ -70,9 +72,8 @@ def state_csv(shape, out_dir):
 
 
 def get_state_fields(points, attrs, fields, out_dir):
-
     dct = {}
-    for s in BASIN_STATES[1:]:
+    for s in BASIN_STATES:
 
         cfile = os.path.join(points, '{}_openet_centr_16FEB2023.csv'.format(s))
         try:
@@ -117,18 +118,37 @@ def get_state_fields(points, attrs, fields, out_dir):
         print(out_, df.shape[0], '\n')
 
 
+def reclassify_itype(in_dir, out_shp):
+    l = [os.path.join(in_dir, '{}_itype.shp'.format(s)) for s in ['co', 'mt', 'ut', 'wa']]
+    cols = ['IRRIG_TYPE', 'IType', 'IRR_TYPE', 'Irrigation']
+    itype_map = itype()
+    df = gpd.GeoDataFrame(columns=['itype', 'geometry'])
+    for f, col in zip(l, cols):
+        c = gpd.read_file(f)
+        c = c[[col, 'geometry']]
+        c.dropna(inplace=True)
+        c['itype'] = c[col].apply(lambda x: itype_map[x])
+        print(c.shape[0], 'feaures in ', os.path.basename(f))
+        df = pd.concat([df, c[['itype', 'geometry']]], ignore_index=True)
+
+    df.crs = 'EPSG:4326'
+    df.to_crs(epsg=5071)
+    df.to_file(out_shp)
+    print(df.shape[0], 'features', out_shp)
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
     inshp = os.path.join(root, 'expansion/shapefiles/openet_centr/irr_tables/')
-
     fields_ = os.path.join(root, 'openET/OpenET_GeoDatabase_5071')
-
     odir = '/media/nvm/field_pts/fields_data/fields_shp'
-
     usbr_attr = '/media/nvm/field_pts/usbr_attr'
+    # get_state_fields(inshp, usbr_attr, fields_, odir)
 
-    get_state_fields(inshp, usbr_attr, fields_, odir)
+    in_itype = '/media/hdisk/itype/field_boundaries/fields_wgs'
+    out_itype = '/media/hdisk/itype/field_boundaries/fields_aea/itype_join.shp'
+    reclassify_itype(in_itype, out_itype)
 # ========================= EOF ====================================================================
