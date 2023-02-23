@@ -72,7 +72,7 @@ def state_csv(shape, out_dir):
 def get_state_fields(points, attrs, fields, out_dir):
 
     dct = {}
-    for s in ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
+    for s in BASIN_STATES[1:]:
 
         cfile = os.path.join(points, '{}_openet_centr_16FEB2023.csv'.format(s))
         try:
@@ -84,8 +84,13 @@ def get_state_fields(points, attrs, fields, out_dir):
         afile = os.path.join(attrs, '{}.csv'.format(s))
         adf = pd.read_csv(afile, index_col='OPENET_ID')
         match = [i for i in df.index if i in adf.index]
-        df.loc[match, 'usbrid'] = adf.loc[match, 'usbrid']
-        df['usbrid'] = df['usbrid'].fillna(0)
+
+        if len(match) > 0:
+            df.loc[match, 'usbrid'] = adf.loc[match, 'usbrid']
+            df['usbrid'] = df['usbrid'].fillna(0)
+        else:
+            df['usbrid'] = [0 for _ in range(df.shape[0])]
+
         print(df.shape[0], 'points', s)
         df = df[df['irr'] > 9]
         print(df.shape[0], 'irr points', s)
@@ -107,10 +112,9 @@ def get_state_fields(points, attrs, fields, out_dir):
         df = df[['usbrid', 'MGRS_TILE', 'geometry']]
         out_ = os.path.join(out_dir, '{}.shp'.format(s))
         df.to_file(out_, crs='EPSG:5071')
+        df = df[['usbrid', 'MGRS_TILE']]
+        df.to_csv(out_.replace('.shp', '.csv'))
         print(out_, df.shape[0], '\n')
-
-    with open('field_points/tiles.json', 'w') as f:
-        json.dump(dct, f, indent=4)
 
 
 if __name__ == '__main__':
@@ -122,7 +126,7 @@ if __name__ == '__main__':
 
     fields_ = os.path.join(root, 'openET/OpenET_GeoDatabase_5071')
 
-    odir = '/media/nvm/field_pts/fields'
+    odir = '/media/nvm/field_pts/fields_data/fields_shp'
 
     usbr_attr = '/media/nvm/field_pts/usbr_attr'
 

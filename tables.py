@@ -10,7 +10,7 @@ import fiona
 from shapely.geometry import Point, shape, mapping
 from rasterstats import zonal_stats
 
-from sfi.gage_data import hydrograph
+from flow.gage_data import hydrograph
 from call_ee import PROPS
 
 DROP = ['left', 'right', 'top', 'bottom']
@@ -289,12 +289,13 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    bname = 'ietr_reclamation_6FEB2023'
+    bname = 'ietr_basins_21FEB2023'
 
     basin_extracts = os.path.join(root, 'tables', 'gridded_tables', bname)
     merged = os.path.join(root, 'tables', 'input_flow_climate_tables', bname)
     hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
-    merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
-                            glob=bname, join_key='FID')
+
+    merge_gridded_flow_data(basin_extracts, merged, flow_dir=hydrographs_,
+                            glob=bname, join_key='STAID')
 
 # ========================= EOF ====================================================================
