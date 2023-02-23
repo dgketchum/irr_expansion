@@ -1,11 +1,12 @@
 import os
 import json
 
+import numpy as np
 from scipy.stats import linregress
 
 from climate_indices import compute, indices
 
-from sfi.gage_data import hydrograph
+from flow.gage_data import hydrograph
 from figures.plot_indices import plot_indices_panel, plot_indices_panel_nonstream
 
 
@@ -17,8 +18,6 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
         dct = {}
         out_json = os.path.join(out_meta, '{}_{}.json'.format(desc_str, month_end))
         for sid, sdata in stations.items():
-            if sid != '00000230':
-                continue
 
             if basins:
                 print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
@@ -39,7 +38,7 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
             if basins:
                 df = df[['q', 'cc', 'ppt', 'etr', 'kc']]
             else:
-                df = df[['cc', 'ppt', 'etr', 'kc']]
+                df = df[['irr', 'cc', 'ppt', 'etr', 'kc']]
 
             met_periods = list(range(1, 13)) + [18, 24, 30, 36]
 
@@ -47,8 +46,8 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                 df['SPI_{}'.format(x)] = indices.spi(df['ppt'].values,
                                                      scale=x,
                                                      distribution=indices.Distribution.gamma,
-                                                     data_start_year=1987,
-                                                     calibration_year_initial=1987,
+                                                     data_start_year=1984,
+                                                     calibration_year_initial=1984,
                                                      calibration_year_final=2021,
                                                      periodicity=compute.Periodicity.monthly)
 
@@ -56,16 +55,16 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                                                        df['etr'].values,
                                                        scale=x,
                                                        distribution=indices.Distribution.pearson,
-                                                       data_start_year=1987,
-                                                       calibration_year_initial=1987,
+                                                       data_start_year=1984,
+                                                       calibration_year_initial=1984,
                                                        calibration_year_final=2021,
                                                        periodicity=compute.Periodicity.monthly)
                 if basins:
                     df['SFI_{}'.format(x)] = indices.spi(df['q'].values,
                                                          scale=x,
                                                          distribution=indices.Distribution.gamma,
-                                                         data_start_year=1987,
-                                                         calibration_year_initial=1987,
+                                                         data_start_year=1984,
+                                                         calibration_year_initial=1984,
                                                          calibration_year_final=2021,
                                                          periodicity=compute.Periodicity.monthly)
 
@@ -73,16 +72,16 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                 df['SCUI_{}'.format(x)] = indices.spi(df['cc'].values,
                                                       scale=x,
                                                       distribution=indices.Distribution.gamma,
-                                                      data_start_year=1987,
-                                                      calibration_year_initial=1987,
+                                                      data_start_year=1984,
+                                                      calibration_year_initial=1984,
                                                       calibration_year_final=2021,
                                                       periodicity=compute.Periodicity.monthly)
 
                 df['SIMI_{}'.format(x)] = indices.spi(df['kc'].values,
                                                       scale=x,
                                                       distribution=indices.Distribution.gamma,
-                                                      data_start_year=1987,
-                                                      calibration_year_initial=1987,
+                                                      data_start_year=1984,
+                                                      calibration_year_initial=1984,
                                                       calibration_year_final=2021,
                                                       periodicity=compute.Periodicity.monthly)
                 ssfi_key = 'SFI_{}'.format(x)
@@ -90,8 +89,8 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                     df[ssfi_key] = indices.spi(df['q'].values,
                                                scale=x,
                                                distribution=indices.Distribution.gamma,
-                                               data_start_year=1987,
-                                               calibration_year_initial=1987,
+                                               data_start_year=1984,
+                                               calibration_year_initial=1984,
                                                calibration_year_final=2021,
                                                periodicity=compute.Periodicity.monthly)
 
@@ -108,12 +107,12 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                     plot_indices_panel_nonstream(df, met_param, use_timescale, month_end, fig_file,
                                                  title_str=sdata['NAME'])
 
-            dct[sid] = {}
             combos = [('SPI', 'SCUI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPEI', 'SIMI')]
             if basins:
                 combos = [('SPI', 'SFI'), ('SPEI', 'SFI'), ('SFI', 'SCUI'), ('SFI', 'SIMI')]
             df = df.loc['1990-01-01':]
             pdf = df.loc[[x for x in df.index if x.month == month_end]]
+            dct[sid] = {'irr_area': np.nanmean(df['irr'].values) / 1e6}
             for met, use in combos:
                 rmax = 0.0
                 corr_ = [met, use, rmax]
@@ -127,6 +126,17 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                         usel = '{}_{}'.format(use, use_ts)
                         met_ind = pdf[msel].values
                         use_ind = pdf[usel].values
+
+                        nan_check = met_ind + use_ind
+                        if np.all(np.isnan(nan_check)):
+                            continue
+                        elif np.any(np.isnan(nan_check)):
+                            isna = np.isnan(nan_check)
+                            if np.count_nonzero(~isna) < 20:
+                                continue
+                            met_ind = met_ind[~isna]
+                            use_ind = use_ind[~isna]
+
                         lr = linregress(met_ind, use_ind)
                         r2 = lr.rvalue ** 2
                         if r2 > rmax:
@@ -145,21 +155,16 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'extracts_ietr_huc8_natet_9JAN2022')
-    data_ = os.path.join(root, 'gages', 'huc8_metadata.json')
-    figs = os.path.join(root, 'figures', 'panel')
-    # write_indices(data_, merged, out_js, plot_dir=None, basins=False, desc_str='huc8')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_huc8_21FEB2023')
+    data_ = os.path.join(root, 'metadata', 'huc8_metadata.json')
+    out_js = os.path.join(root, 'analysis', 'huc8_sensitivities')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_huc8_21FEB2023')
+    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='huc8')
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_reclamation_6FEB2023')
-    data_ = os.path.join(root, 'gages', 'usbr_metadata_north.json')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_basins_21FEB2023')
+    data_ = os.path.join(root, 'metadata', 'irrigated_gage_metadata.json')
     out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    figs = os.path.join(root, 'figures', 'panel', 'ietr_reclamation_6FEB2023')
-    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='usbr')
-
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_nonreclamation_6FEB2023')
-    data_ = os.path.join(root, 'gages', 'nonreclamation_metadata_north.json')
-    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    figs = os.path.join(root, 'figures', 'panel', 'ietr_nonreclamation_6FEB2023')
-    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='nonusbr')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_basins_21FEB2023')
+    # write_indices(data_, merged, out_js, plot_dir=figs, basins=True, desc_str='usbr')
 
 # ========================= EOF ====================================================================
