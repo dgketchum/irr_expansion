@@ -6,7 +6,8 @@ from calendar import monthrange
 import numpy as np
 import ee
 
-from call_ee import ee_task_start
+from utils.cdl import get_cdl
+from call_ee import ee_task_start, BASIN_STATES
 
 sys.path.insert(0, os.path.abspath('..'))
 sys.setrecursionlimit(5000)
@@ -17,7 +18,6 @@ CMBRB_CLIP = 'users/dgketchum/boundaries/CMB_RB_CLIP'
 CORB_CLIP = 'users/dgketchum/boundaries/CO_RB'
 KLAMATH_CLIP = 'users/dgketchum/boundaries/klamath_rogue_buff'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
-BASIN_STATES = ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 
 def get_geomteries():
@@ -44,13 +44,79 @@ def get_geomteries():
     return bozeman, navajo, test_point, western_us
 
 
+def get_field_cdl(tables, bucket, year, description, join_col='OPENET_ID'):
+    initialize()
+    cdl_cult, cdl_crop, cdl_simple = get_cdl(year)
+    cdl_crop = cdl_crop.toInt()
+    cdl_crop = cdl_crop.rename('cdl')
+    select_ = [join_col, 'MGRS_TILE', 'mode']
+
+    with open('field_points/tiles.json', 'r') as f_obj:
+        tiles = json.load(f_obj)
+
+    for st in BASIN_STATES:
+
+        fc = ee.FeatureCollection(os.path.join(tables, st))
+
+        for tile in tiles[st]:
+            tile_fields = fc.filterMetadata('MGRS_TILE', 'equals', tile)
+            out_desc = '{}_{}_{}_{}'.format(description, st, tile, year)
+
+            data = cdl_crop.reduceRegions(collection=tile_fields,
+                                          reducer=ee.Reducer.mode())
+
+            task = ee.batch.Export.table.toCloudStorage(
+                data,
+                description=out_desc,
+                bucket=bucket,
+                fileNamePrefix=out_desc,
+                fileFormat='CSV',
+                selectors=select_)
+
+            ee_task_start(task)
+            print(out_desc)
+
+
+def get_field_itype(tables, bucket, year, description, join_col='OPENET_ID'):
+    initialize()
+    fc = ee.FeatureCollection('users/dgketchum/expansion/itype_int')
+    label = ee.Image(0).paint(featureCollection=fc, color='itype').rename('itype')
+    select_ = [join_col, 'MGRS_TILE', 'mode']
+
+    with open('field_points/tiles.json', 'r') as f_obj:
+        tiles = json.load(f_obj)
+
+    for st in ['CO', 'MT', 'NM', 'UT', 'WA', 'WY']:
+
+        fc = ee.FeatureCollection(os.path.join(tables, st))
+
+        for tile in tiles[st]:
+            tile_fields = fc.filterMetadata('MGRS_TILE', 'equals', tile)
+            out_desc = '{}_{}_{}_{}'.format(description, st, tile, year)
+
+            data = label.reduceRegions(collection=tile_fields,
+                                       reducer=ee.Reducer.mode(),
+                                       scale=30)
+
+            task = ee.batch.Export.table.toCloudStorage(
+                data,
+                description=out_desc,
+                bucket=bucket,
+                fileNamePrefix=out_desc,
+                fileFormat='CSV',
+                selectors=select_)
+
+            ee_task_start(task)
+            print(out_desc)
+
+
 def export_gridded_data(tables, bucket, years, description, features=None, check_exists=None,
                         min_years=5, debug=False, join_col='STAID', geo_type='Polygon',
                         gs_met=False, masks=True, volumes=True):
     initialize()
     missing_files = None
     if check_exists:
-        l = open(f, 'r').readlines()
+        l = open(check_exists, 'r').readlines()
         missing_files = [ln.strip() for ln in l]
         missing_files = [os.path.basename(f_) for f_ in missing_files]
 
@@ -265,21 +331,7 @@ def initialize():
 
 if __name__ == '__main__':
     bucket = 'wudr'
-    years_ = list(range(1984, 2022))
-    years_.reverse()
-
-    basins = 'users/dgketchum/gages/gage_basins'
-    export_gridded_data(basins, bucket, years_, 'ietr_basins_21FEB2023', min_years=5, gs_met=False,
-                        join_col='STAID', geo_type='basin', volumes=True, masks=True)
-
-    huc = 'users/dgketchum/boundaries/huc8_study'
-    export_gridded_data(huc, bucket, years_, 'ietr_huc8_21FEB2023', min_years=5, gs_met=False,
-                        join_col='huc8', geo_type='huc', volumes=True, masks=True)
-
-    f = os.path.join(os.getcwd(), 'field_points', 'missing.txt')
-    table_ = 'users/dgketchum/expansion/points/field_pts_attr_13FEB2023'
     table_ = 'users/dgketchum/expansion/fields'
-    export_gridded_data(table_, bucket, years_, 'ietr_fields_16FEB2023', min_years=5, gs_met=False,
-                        debug=False, join_col='OPENET_ID', geo_type='fields', check_exists=f,
-                        volumes=False, masks=False)
+    get_field_itype(table_, bucket, 2021, 'openet_itype')
+
 # ========================= EOF ================================================================================
