@@ -5,67 +5,124 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from field_points.itype_mapping import itype_integer_mapping
 
-TARGET_STATES = ['CA', 'WY']
+np.random.seed(1234)
 
 
-def partition_response(csv, attrs, out_fig, month=10):
+def partition_usbr_response(npy, out_fig):
+    files = [os.path.join(npy, x) for x in os.listdir(npy) if x.endswith('.npy')]
+    timescales = list(set([os.path.basename(n).strip('.npy') for n in files]))
+    timescales.sort()
 
-    first = True
-    bnames = [x for x in os.listdir(csv) if x.strip('.csv') in TARGET_STATES]
-    csv = [os.path.join(csv, x) for x in bnames]
-    attrs = [os.path.join(attrs, x) for x in os.listdir(attrs) if x in bnames]
-    for m, f in zip(attrs, csv):
-        c = pd.read_csv(f, index_col=0)
-        meta = pd.read_csv(m, index_col='OPENET_ID')
-        c.loc[meta.index, 'usbrid'] = meta['usbrid']
-        area_ = os.path.basename(f).split('.')[0].split('_')[-1].upper()
-        if first:
-            df = c.copy()
-            first = False
-        else:
-            df = pd.concat([df, c])
+    for ts, f in zip(timescales, files):
+        rec = np.fromfile(f, dtype=float).reshape((4, -1))
+        print(ts, rec.shape[1])
+        rec = rec[:, np.random.randint(0, rec.shape[1], int(1e6))]
+        df = pd.DataFrame(data=rec.T, columns=['SIMI', 'SPEI', 'month', 'Management'])
+        df['Management'] = df['Management'].apply(lambda x: 'Reclamation' if x > 0 else 'Non-Federal')
 
-    spei_w, spei_d, spei_n = [], [], []
-    simi_w, simi_d, simi_n = [], [], []
-    area = []
+        df.loc[df['SPEI'] < 0, 'Class'] = 'Normal'
+        df.loc[df['SPEI'] < -1.3, 'Class'] = 'Dry'
+        df.loc[df['SPEI'] >= 0, 'Class'] = 'Wet'
 
-    for k, v in data.items():
-        for kk, vv in v.items():
-            m = pd.to_datetime(kk).month
-            sm, sp = vv['simi'], vv['spei']
-            if m == month and np.isfinite(sm) and np.isfinite(sp):
-                if sp > 0:
-                    spei_w.append('Wet')
-                    simi_w.append(sm)
-                elif -1. < sp <= 0:
-                    spei_n.append('Normal')
-                    simi_n.append(sm)
-                else:
-                    spei_d.append('Dry')
-                    simi_d.append(sm)
-                area.append(area_)
-                if len(simi_n + simi_d + simi_w) % 10000 == 0:
-                    print(len(simi_n + simi_d + simi_w))
-        else:
-            continue
-        break
+        for clss in ['Normal', 'Dry', 'Wet']:
+            for mng in ['Reclamation', 'Non-Federal']:
+                v = df.loc[(df['Class'] == clss) & (df['Management'] == mng), 'SIMI'].values
+                v = v[~np.isnan(v)]
+                q75, q25 = np.percentile(v, [75, 25])
+                iqr = q75 - q25
+                print('{} {}: {:.3f}, {:.3f}, {} values'.format(clss, mng, np.median(v), iqr, len(v)))
 
-    simi = simi_n + simi_d + simi_w
-    spei = spei_n + spei_d + spei_w
-    if first:
-        c = pd.DataFrame(data=np.array([simi, spei, area]).T,
-                          columns=['SIMI', 'SPEI', 'Management'])
-        first = False
-    else:
-        f = pd.DataFrame(data=np.array([simi, spei, area]).T,
-                         columns=['SIMI', 'SPEI', 'Management'])
-        c = pd.concat([c, f])
+        df.drop(columns=['month'], inplace=True)
+        sns.violinplot(data=df, x='Class', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'])
+        plt.suptitle('Western Irrigation Management {}'.format(ts))
+        ofig = os.path.join(out_fig, ts)
+        plt.legend(ncol=2)
+        plt.savefig(ofig)
+        plt.close()
+        print(ofig, '\n')
 
-    c['SIMI'] = c['SIMI'].values.astype(float)
-    sns.violinplot(data=c, x='SPEI', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'])
-    plt.suptitle('Colorado Irrigation Management')
-    plt.savefig(out_fig)
+
+def partition_itype_response(npy, out_fig):
+    files = [os.path.join(npy, x) for x in os.listdir(npy) if x.endswith('.npy')]
+    timescales = list(set([os.path.basename(n).strip('.npy') for n in files]))
+    timescales.sort()
+
+    itype = itype_integer_mapping()
+    itype = {v: k for k, v in itype.items()}
+
+    for ts, f in zip(timescales, files):
+        rec = np.fromfile(f, dtype=float).reshape((4, -1))
+        print(rec.shape[1])
+        df = pd.DataFrame(data=rec.T, columns=['SIMI', 'SPEI', 'month', 'itype'])
+        df = df[df['itype'] > 0]
+        df['itype'] = df['itype'].values.astype(int)
+        df['Infrastructure'] = df['itype'].apply(lambda x: itype[x])
+
+        df.loc[df['SPEI'] < 0, 'Class'] = 'Normal'
+        df.loc[df['SPEI'] < -1.3, 'Class'] = 'Dry'
+        df.loc[df['SPEI'] >= 0, 'Class'] = 'Wet'
+
+        for clss in ['Normal', 'Dry', 'Wet']:
+            for itp in range(1, 5):
+                v = df.loc[(df['Class'] == clss) & (df['itype'] == itp), 'SIMI'].values
+                v = v[~np.isnan(v)]
+                q75, q25 = np.percentile(v, [75, 25])
+                iqr = q75 - q25
+                print('{} {}: {:.3f}, {:.3f}, {} values'.format(clss, itype[itp], np.median(v), iqr, len(v)))
+
+        df.drop(columns=['itype', 'month'], inplace=True)
+        sns.violinplot(data=df, x='Class', y='SIMI', hue='Infrastructure',
+                       order=['Dry', 'Normal', 'Wet'])
+
+        plt.suptitle('Irrigation Management and Irrigation Type {}'.format(ts))
+        ofig = os.path.join(out_fig, '{}.png'.format(ts))
+        plt.legend(ncol=2)
+        plt.savefig(ofig)
+        plt.close()
+        print(ofig)
+
+
+def partition_time_response(npy, out_fig):
+    timescales = list(set(['_'.join(n.split('_')[:-1]) for n in os.listdir(npy)]))
+    timescales.sort()
+    for ts in timescales:
+        recfile = [os.path.join(npy, n) for n in os.listdir(npy) if 'early' in n and ts in n][0]
+        nonrecfile = [os.path.join(npy, n) for n in os.listdir(npy) if 'late' not in n and ts in n][0]
+
+        rec = np.fromfile(recfile, dtype=float).reshape((4, -1))
+        print(rec.shape[1])
+        rec = rec[:, np.random.randint(0, rec.shape[1], int(1e6))]
+        df = pd.DataFrame(data=rec.T, columns=['SIMI', 'SPEI', 'month', 'Time'])
+        df['Time'] = ['1987-1996' for _ in range(df.shape[0])]
+
+        nrec = np.fromfile(nonrecfile, dtype=float).reshape((4, -1))
+        nrec = nrec[:, np.random.randint(0, nrec.shape[1], int(1e6))]
+        ndf = pd.DataFrame(data=nrec.T, columns=['SIMI', 'SPEI', 'month', 'Time'])
+        ndf['Time'] = ['2011-2021' for _ in range(ndf.shape[0])]
+
+        df = pd.concat([df, ndf], ignore_index=True)
+        df.loc[df['SPEI'] < 0, 'Class'] = 'Normal'
+        df.loc[df['SPEI'] < -1.3, 'Class'] = 'Dry'
+        df.loc[df['SPEI'] >= 0, 'Class'] = 'Wet'
+
+        for clss in ['Normal', 'Dry', 'Wet']:
+            for itp in ['1987-1996', '2011-2021']:
+                v = df.loc[(df['Class'] == clss) & (df['Time'] == itp), 'SIMI'].values
+                v = v[~np.isnan(v)]
+                q75, q25 = np.percentile(v, [75, 25])
+                iqr = q75 - q25
+                print('{} {}: {:.3f}, {:.3f}, {} values'.format(clss, itp, np.median(v), iqr, len(v)))
+
+        sns.violinplot(data=df, x='Class', y='SIMI', hue='Time',
+                       order=['Dry', 'Normal', 'Wet'])
+        plt.suptitle('Western Irrigation Management')
+        ofig = os.path.join(out_fig, ts)
+        plt.legend(ncol=2)
+        plt.savefig(ofig)
+        plt.close()
+        print(ofig, '\n')
 
 
 if __name__ == '__main__':
@@ -73,8 +130,18 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    in_ = '/media/nvm/field_pts/indices'
-    meta = '/media/nvm/field_pts/usbr_attr'
-    out_ = os.path.join(root, 'figures', 'partitions', 'fields.png')
-    partition_response(in_, meta, out_)
+    param = 'usbr'
+    part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
+    out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
+    # partition_usbr_response(part_, out_)
+
+    param = 'itype'
+    part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
+    out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
+    # partition_itype_response(part_, out_)
+
+    param = 'time'
+    part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
+    out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
+    partition_time_response(part_, out_)
 # ========================= EOF ====================================================================
