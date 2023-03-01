@@ -6,6 +6,9 @@ from itertools import combinations
 
 import numpy as np
 import pandas as pd
+import requests
+from lxml import etree
+from io import StringIO
 
 from nasspython.nass_api import nass_data, nass_count, nass_param
 from call_ee import BASIN_STATES
@@ -60,43 +63,55 @@ def get_openet_cdl(in_dir, join_csv, out_dir):
     pprint(dct)
 
 
-def transition_probability(csv_dir, out_matrix):
-
+def transition_probability(cdl_npy, out_matrix):
     cdl = cdl_key()
-    classes = ['Grain', 'Vegetable', 'Forage', 'Orchard', 'Uncultivated']
+    cdl = {k: v[1] for k, v in cdl.items()}
+    time_series_length = 17
+    classes = ['Grain', 'Vegetable', 'Forage', 'Orchard', 'Uncultivated', 'Fallow']
 
-    l = [os.path.join(csv_dir, x) for x in os.listdir(csv_dir)]
-    first = True
-    for f_ in l:
-        c = pd.read_csv(f_, index_col='OPENET_ID')
-        c[c.values < 0] = 0
-        if first:
-            df = c.copy()
-            first = False
-        else:
-            df = pd.concat([df, c])
+    rec = np.fromfile(cdl_npy, dtype=float).reshape((4, -1, time_series_length))
+    rec = rec[:, np.random.randint(0, rec.shape[1], int(1e6)), :]
+    codes = np.where(rec[3] < 0, np.zeros_like(rec[3]), rec[3])
+    codes = np.vectorize(cdl.get)(codes)
+    rec[3] = codes
 
-    l = list(df.values.flatten())
-    l = [cdl[v][1] for v in l]
-
-    set_ = list(set(l))
+    set_ = list(np.unique(rec[3]))
     keys = list((combinations(set_, 2)))
     opposites = [(s, f) for f, s in keys]
     [keys.append(o) for o in opposites]
     [keys.append((i, i)) for i in set_]
-    dct = {k: 0 for k in keys}
-    for i, v in enumerate(l):
-        if i % df.shape[1] == 0:
-            continue
-        try:
-            dct[(l[i], l[i + 1])] += 1
-        except IndexError:
-            break
-    map = np.zeros((5, 5))
-    for r, c in dct.keys():
-        map[r - 1, c - 1] = dct[r, c]
-    prob = np.divide(map, np.sum(map, axis=0))
-    tdf = pd.DataFrame(columns=classes, index=classes, data=prob)
+    keys = [(int(a), int(b)) for a, b in keys]
+    dct = {clime: {k: 0 for k in keys} for clime in ['Wet', 'Normal', 'Dry', 'Driest']}
+    rec = np.moveaxis(rec, 0, 1)
+
+    for v in rec:
+        for e, c in enumerate(v.T):
+            if e == 0:
+                continue
+            if c[1] >= 0:
+                clime = 'Wet'
+            elif 0 > c[1] > -1.3:
+                clime = 'Normal'
+            elif -2 < c[1] < -1.3:
+                clime = 'Dry'
+            else:
+                clime = 'Driest'
+
+            trans = (int(v.T[e - 1, 3]), int(c[3]))
+            dct[clime][trans] += 1
+
+    for k, d in dct.items():
+        map = np.zeros((len(classes), len(classes)))
+        for r, c in d.keys():
+            map[r - 1, c - 1] = d[r, c]
+        prob = np.divide(map, np.sum(map, axis=0))
+        tdf = pd.DataFrame(columns=classes, index=classes, data=prob)
+        print(k)
+        print(tdf, '\n')
+        out_file = os.path.join(out_matrix, '{}.csv'.format(k.lower()))
+        tdf.to_csv(out_file, float_format='%.3f')
+
+    pass
 
 
 def get_crop_values(key):
@@ -115,6 +130,25 @@ def get_crop_values(key):
         pass
 
 
+def cdl_accuracy(out_js):
+    dct = {s: [] for s in BASIN_STATES}
+    for y in range(2008, 2022):
+        for s in BASIN_STATES:
+            url = 'https://www.nass.usda.gov/Research_and_Science/' \
+                  'Cropland/metadata/metadata_{}{}.htm'.format(s.lower(), str(y)[-2:])
+            resp = requests.get(url).content.decode('utf-8')
+            for i in resp.split('\n'):
+                txt = i.strip('\r')
+                if txt.startswith('OVERALL'):
+                    l = txt.split(' ')
+                    k = float(l[-1])
+            dct[s].append(k)
+            print(s, y, '{:.3f}'.format(k))
+
+    with open(out_js, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -122,12 +156,16 @@ if __name__ == '__main__':
 
     fields_openet = '/media/research/IrrigationGIS/openET/OpenET_GeoDatabase_cdl'
     extract = '/media/nvm/field_pts/csv/cdl'
-    cdl_csv = '/media/nvm/field_pts/fields_data/fields_cdl'
+    cdl_csv = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
     # get_openet_cdl(fields_openet, extract, cdl_csv)
 
     key_ = '/home/dgketchum/quickstats_token.json'
     # get_crop_values(key_)
 
+    met_cdl = '/media/nvm/field_pts/fields_data/partitioned_npy/cdl/met4_ag3_fr8.npy'
     transistion = '/media/research/IrrigationGIS/expansion/analysis/transition'
-    transition_probability(cdl_csv, transistion)
+    # transition_probability(met_cdl, transistion)
+
+    cdl_csv = '/media/research/IrrigationGIS/expansion/tables/cdl/accuracy/acc.json'
+    cdl_accuracy(cdl_csv)
 # ========================= EOF ====================================================================
