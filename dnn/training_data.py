@@ -8,7 +8,7 @@ import ee
 from utils.cdl import get_cdl
 from utils.ee_utils import get_world_climate
 
-sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../..'))
 
 sys.setrecursionlimit(5000)
 
@@ -20,7 +20,7 @@ KLAMATH_CLIP = 'users/dgketchum/boundaries/klamath_rogue_buff'
 BOUNDARIES = 'users/dgketchum/boundaries'
 WESTERN_11_STATES = 'users/dgketchum/boundaries/western_11_union'
 
-BASIN_STATES = ['AZ', 'CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
+BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 PROPS = sorted(
     ['anm_ppt_gs', 'anm_ppt_lspr', 'anm_ppt_spr', 'anm_ppt_sum', 'anm_ppt_win', 'anm_ppt_wy', 'anm_ppt_wy_et',
@@ -32,12 +32,13 @@ PROPS = sorted(
      'tmp_gs', 'tmp_lspr', 'tmp_spr', 'tmp_sum', 'tmp_win', 'tmp_wy', 'tmp_wy_et', 'tmp_wy_spr', 'tpi_1250',
      'tpi_150', 'tpi_250'])
 
-SUBPROPS = ['aspect', 'elevation', 'slope']
 
-
-def get_points_cultivation_data(state, tables, file_prefix, target='uncult', join_col='id', extra=True):
+def get_points_cultivation_data(state, tables, file_prefix, target='uncult', join_col='id',
+                                extra=True, filter_state=False):
     fc = ee.FeatureCollection(tables)
     fc = fc.filterBounds(ee.FeatureCollection('users/dgketchum/expansion/study_area_klamath').geometry())
+    if filter_state:
+        fc = fc.filterMetadata('STUSPS', 'equals', state)
     irr_coll = ee.ImageCollection(RF_ASSET)
 
     coll = irr_coll.filterDate('1987-01-01', '2021-12-31').select('classification')
@@ -79,18 +80,6 @@ def get_points_cultivation_data(state, tables, file_prefix, target='uncult', joi
 
     print(desc)
     task.start()
-
-
-def get_geomteries():
-    uinta = ee.Geometry.Polygon([[-109.45865297030385, 40.23092798019809],
-                                 [-109.2142071695226, 40.23092798019809],
-                                 [-109.2142071695226, 40.463280555650584],
-                                 [-109.45865297030385, 40.463280555650584],
-                                 [-109.45865297030385, 40.23092798019809]])
-
-    test_point = ee.Geometry.Point(-111.19417486580859, 45.73357569538925)
-
-    return uinta, test_point
 
 
 def stack_bands(yr, roi, resolution, **scale_factors):
@@ -223,89 +212,7 @@ def irr_et_data(yr):
     return bands
 
 
-def extract_point_data(tables, bucket, years, description, debug=False):
-    """
-    Reduce Regions, i.e. zonal stats: takes a statistic from a raster within the bounds of a vector.
-    Use this to get e.g. irrigated area within a county, HUC, or state. This can mask based on Crop Data Layer,
-    and can mask data where the sum of irrigated years is less than min_years. This will output a .csv to
-    GCS wudr bucket.
-    :param features:
-    :param bucket:
-    :param tables: vector data over which to take raster statistics
-    :param years: years over which to run the stats
-    :param description: export name append str
-    :param cdl_mask:
-    :param min_years:
-    :return:
-    """
-    fc = ee.FeatureCollection(tables)
-    cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
-    umrb_clip = ee.FeatureCollection(UMRB_CLIP)
-    corb_clip = ee.FeatureCollection(CORB_CLIP)
-
-    irr_coll = ee.ImageCollection(RF_ASSET)
-    select_ = ['id']
-
-    for yr in years:
-        for month in range(4, 11):
-            s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
-            end_day = monthrange(yr, month)[1]
-            e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
-
-            irr_str = 'irr_{}'.format(yr)
-            irr = irr_coll.filterDate('{}-01-01'.format(yr), '{}-12-31'.format(yr)).select('classification').mosaic()
-            irr = irr.rename(irr_str)
-
-            annual_coll = ee.ImageCollection('users/dgketchum/ssebop/cmbrb').merge(
-                ee.ImageCollection('users/hoylmanecohydro2/ssebop/cmbrb'))
-            et_coll = annual_coll.filter(ee.Filter.date(s, e))
-            et_cmb = et_coll.sum().multiply(0.00001).clip(cmb_clip.geometry())
-
-            annual_coll = ee.ImageCollection('users/kelseyjencso/ssebop/corb').merge(
-                ee.ImageCollection('users/dgketchum/ssebop/corb')).merge(
-                ee.ImageCollection('users/dpendergraph/ssebop/corb'))
-            et_coll = annual_coll.filter(ee.Filter.date(s, e))
-            et_corb = et_coll.sum().multiply(0.00001).clip(corb_clip.geometry())
-
-            annual_coll_ = ee.ImageCollection('projects/usgs-ssebop/et/umrb')
-            et_coll = annual_coll_.filter(ee.Filter.date(s, e))
-            et_umrb = et_coll.sum().multiply(0.00001).clip(umrb_clip.geometry())
-
-            et_str = 'et_{}_{}'.format(yr, month)
-            et_sum = ee.ImageCollection([et_cmb, et_corb, et_umrb]).mosaic()
-            et = et_sum.rename(et_str)
-
-            select_.append(et_str)
-            if month == 4:
-                select_.append(irr_str)
-                bands = irr.addBands([et])
-            else:
-                bands = bands.addBands([et])
-
-        if debug:
-            pt = bands.sample(region=get_geomteries()[2],
-                              numPixels=1,
-                              scale=30)
-            p = pt.first().getInfo()['properties']
-            print('propeteries {}'.format(p))
-
-        data = bands.reduceRegions(collection=fc,
-                                   reducer=ee.Reducer.sum(),
-                                   scale=30)
-
-        out_desc = 'pts_{}_{}'.format(description, yr)
-        task = ee.batch.Export.table.toCloudStorage(
-            data,
-            description=out_desc,
-            bucket=bucket,
-            fileNamePrefix=out_desc,
-            fileFormat='CSV',
-            selectors=select_)
-        task.start()
-        print(out_desc)
-
-
-def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_et=False):
+def extract_points_data(file_prefix, points_layer, region, years, scale, clamp_et=False):
     ee.Initialize()
     roi = ee.FeatureCollection(region)
     points = ee.FeatureCollection(points_layer)
@@ -320,8 +227,6 @@ def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_
             stack = stack.clip(state_bound)
             st_points = points.filterMetadata('STUSPS', 'equals', st)
 
-            # st_points = ee.FeatureCollection(ee.Geometry.Point(-120.260594, 46.743666))
-
             plot_sample_regions = stack.sampleRegions(
                 collection=st_points,
                 scale=scale,
@@ -330,8 +235,6 @@ def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_
 
             if clamp_et:
                 plot_sample_regions = plot_sample_regions.filter(ee.Filter.lt('ratio', ee.Number(1.0)))
-
-            # point = plot_sample_regions.first().getInfo()
 
             desc = '{}_{}_{}'.format(file_prefix, st, yr)
             task = ee.batch.Export.table.toCloudStorage(
@@ -353,71 +256,6 @@ def request_band_extract(file_prefix, points_layer, region, years, scale, clamp_
                     fileNamePrefix=desc,
                     fileFormat='CSV')
                 task.start()
-
-
-def landsat_c2_sr(input_img):
-    # credit: cgmorton; https://github.com/Open-ET/openet-core-beta/blob/master/openet/core/common.py
-
-    INPUT_BANDS = ee.Dictionary({
-        'LANDSAT_4': ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7',
-                      'ST_B6', 'QA_PIXEL', 'QA_RADSAT'],
-        'LANDSAT_5': ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7',
-                      'ST_B6', 'QA_PIXEL', 'QA_RADSAT'],
-        'LANDSAT_7': ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7',
-                      'ST_B6', 'QA_PIXEL', 'QA_RADSAT'],
-        'LANDSAT_8': ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7',
-                      'ST_B10', 'QA_PIXEL', 'QA_RADSAT'],
-        'LANDSAT_9': ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7',
-                      'ST_B10', 'QA_PIXEL', 'QA_RADSAT'],
-    })
-    OUTPUT_BANDS = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7',
-                    'B10', 'QA_PIXEL', 'QA_RADSAT']
-
-    spacecraft_id = ee.String(input_img.get('SPACECRAFT_ID'))
-
-    prep_image = input_img \
-        .select(INPUT_BANDS.get(spacecraft_id), OUTPUT_BANDS) \
-        .multiply([0.0000275, 0.0000275, 0.0000275, 0.0000275,
-                   0.0000275, 0.0000275, 0.00341802, 1, 1]) \
-        .add([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2, 149.0, 0, 0])
-
-    def _cloud_mask(i):
-        qa_img = i.select(['QA_PIXEL'])
-        cloud_mask = qa_img.rightShift(3).bitwiseAnd(1).neq(0)
-        cloud_mask = cloud_mask.Or(qa_img.rightShift(2).bitwiseAnd(1).neq(0))
-        cloud_mask = cloud_mask.Or(qa_img.rightShift(1).bitwiseAnd(1).neq(0))
-        cloud_mask = cloud_mask.Or(qa_img.rightShift(4).bitwiseAnd(1).neq(0))
-        cloud_mask = cloud_mask.Or(qa_img.rightShift(5).bitwiseAnd(1).neq(0))
-        sat_mask = i.select(['QA_RADSAT']).gt(0)
-        cloud_mask = cloud_mask.Or(sat_mask)
-
-        cloud_mask = cloud_mask.Not().rename(['cloud_mask'])
-
-        return cloud_mask
-
-    mask = _cloud_mask(input_img)
-
-    image = prep_image.updateMask(mask).copyProperties(input_img, ['system:time_start'])
-
-    return image
-
-
-def landsat_masked(start_year, end_year, doy_start, doy_end, roi):
-    start = '{}-01-01'.format(start_year)
-    end_date = '{}-01-01'.format(end_year)
-
-    l5_coll = ee.ImageCollection('LANDSAT/LT05/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).filter(ee.Filter.calendarRange(
-        doy_start, doy_end, 'day_of_year')).map(landsat_c2_sr)
-    l7_coll = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).filter(ee.Filter.calendarRange(
-        doy_start, doy_end, 'day_of_year')).map(landsat_c2_sr)
-    l8_coll = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2').filterBounds(
-        roi).filterDate(start, end_date).filter(ee.Filter.calendarRange(
-        doy_start, doy_end, 'day_of_year')).map(landsat_c2_sr)
-
-    lsSR_masked = ee.ImageCollection(l7_coll.merge(l8_coll).merge(l5_coll))
-    return lsSR_masked
 
 
 def is_authorized():
@@ -446,10 +284,10 @@ def ee_task_start(task, n=6):
 if __name__ == '__main__':
     is_authorized()
 
-    pts = 'users/dgketchum/openet/field_centroids'
+    pts = 'users/dgketchum/points/validation_intial_28FEB2023'
     for s in BASIN_STATES:
-        layer = os.path.join(pts, s)
-        get_points_cultivation_data(s, layer, 'openet_centr_16FEB2023', target='irr', join_col='OPENET_ID', extra=False)
+        get_points_cultivation_data(s, pts, 'validation_intial_28FEB2023', target='uncult',
+                                    join_col='id', extra=True, filter_state=True)
 
     points_ = 'users/dgketchum/expansion/points/points_nonforest_2FEB2023'
     bucket = 'wudr'
