@@ -1,24 +1,16 @@
-import os
 import json
-from pprint import pprint
+import os
 from collections import OrderedDict
 from itertools import combinations
+from pprint import pprint
 
 import numpy as np
 import pandas as pd
 import requests
-from lxml import etree
-from io import StringIO
+from fuzzywuzzy import fuzz, process
 
-from nasspython.nass_api import nass_data, nass_count, nass_param
-from call_ee import BASIN_STATES
-from utils.cdl import study_area_crops, cdl_key
-from utils.placenames import state_name_abbreviation
-
-kwargs = dict(source_desc='CENSUS', sector_desc='CROPS', group_desc=None, commodity_desc=None, short_desc=None,
-              domain_desc=None, agg_level_desc='STATE', domaincat_desc=None, statisticcat_desc=None,
-              state_name=None, asd_desc=None, county_name=None, region_desc=None, zip_5=None,
-              watershed_desc=None, year=None, freq_desc='ANNUAL', reference_period_desc=None)
+from gridded_data import BASIN_STATES
+from utils.cdl import cdl_key, study_area_crops
 
 
 def get_openet_cdl(in_dir, join_csv, out_dir):
@@ -56,9 +48,10 @@ def get_openet_cdl(in_dir, join_csv, out_dir):
                 crop_counts[code] += ct
         df.to_csv(outf)
 
-    crop_counts = {k: v for k, v in crop_counts.items() if v > 10000}
+    crop_counts = {k: v for k, v in crop_counts.items() if k > 0}
     codes = list(crop_counts.keys())
-    l = sorted([(c, (cdl[c][0], crop_counts[c])) for c in codes], key=lambda x: x[1][1], reverse=True)
+    l = sorted([(c, (cdl[c][0], crop_counts[c])) for c in codes if len(cdl[c][0]) > 3],
+               key=lambda x: x[1][1], reverse=True)
     dct = OrderedDict(l)
     pprint(dct)
 
@@ -86,7 +79,7 @@ def transition_probability(cdl_npy, out_matrix):
 
     for v in rec:
         for e, c in enumerate(v.T):
-            if e == 0:
+            if e == 16:
                 continue
             if c[1] >= 0:
                 clime = 'Wet'
@@ -97,7 +90,8 @@ def transition_probability(cdl_npy, out_matrix):
             else:
                 clime = 'Driest'
 
-            trans = (int(v.T[e - 1, 3]), int(c[3]))
+            # trans = (int(v.T[e - 1, 3]), int(c[3]))
+            trans = (int(c[3]), int(v.T[e + 1, 3]))
             dct[clime][trans] += 1
 
     for k, d in dct.items():
@@ -112,22 +106,6 @@ def transition_probability(cdl_npy, out_matrix):
         tdf.to_csv(out_file, float_format='%.3f')
 
     pass
-
-
-def get_crop_values(key):
-    state_abv = state_name_abbreviation()
-
-    with open(key, 'r') as fp:
-        key = json.load(fp)['auth']
-
-    for state in BASIN_STATES:
-        kwargs['state_name'] = state_abv[state].upper()
-        kwargs['commodity_desc'] = 'HAY'
-        kwargs['year'] = 2017
-        kwargs['domain_desc'] = 'AREA HARVESTED'
-        kwargs['short_desc'] = 'HAY - ACRES HARVESTED'
-        resp = nass_data(key, **kwargs)
-        pass
 
 
 def cdl_accuracy(out_js):
@@ -149,6 +127,44 @@ def cdl_accuracy(out_js):
         json.dump(dct, fp, indent=4)
 
 
+def map_nass_to_csl(values_dir, txt):
+    cdl = study_area_crops()
+    df = pd.read_table(txt, header=None)
+    df.columns = ['index', 'file', 'desc']
+    df.drop(columns=['index'], inplace=True)
+    df['desc'] = df['desc'].apply(lambda x: x.split('Price per')[0])
+
+    dct_choices = sorted([v[0] for k, v in cdl.items() if len(v[0]) > 3 and v[1] > 1000])
+    inv_cdl = {v[0]: k for k, v in cdl.items()}
+
+    for t, f in zip(['fruit', 'misc'], ['cpvl_p10_t004.csv', 'cpvl_p08_t002.csv']):
+
+        table = pd.read_csv(os.path.join(values_dir, 'CropValuSu-02-24-2017', f),
+                            skiprows=6, encoding_errors='ignore')
+        table.columns = ['4', 'h', 'name', 'unit', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+        table = table[['name', 'y_minus_3', 'y_minus_2', 'y_minus_1']]
+        table.dropna(subset=['name'], inplace=True)
+        table.dropna(subset=['y_minus_3', 'y_minus_2', 'y_minus_1'], how='all', inplace=True)
+
+        for i, r in table.iterrows():
+            approx = process.extractOne(r['name'], choices=dct_choices)
+            if approx[1] > 85:
+                print('match {} == {}'.format(r['name'], approx[0]))
+                test_exists = process.extractOne(r['name'], choices=df['desc'])
+                if test_exists[1] > 85:
+                    print('already in database, skipping')
+                else:
+                    print('appending')
+                    df = df.append({'file': f, 'desc': approx[0]}, ignore_index=True)
+            else:
+                print('nonmatch {} == {}'.format(r['name'], approx[0]))
+
+    df['cdl_name'] = df['desc'].apply(lambda x: process.extractOne(x, choices=dct_choices)[0])
+    df['cdl_code'] = df['desc'].apply(lambda x: inv_cdl[process.extractOne(x, choices=dct_choices)[0]])
+    df.to_csv('values.csv')
+    pass
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -167,5 +183,8 @@ if __name__ == '__main__':
     # transition_probability(met_cdl, transistion)
 
     cdl_csv = '/media/research/IrrigationGIS/expansion/tables/cdl/accuracy/acc.json'
-    cdl_accuracy(cdl_csv)
+    # cdl_accuracy(cdl_csv)
+
+    price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value'
+    map_nass_to_csl(price_data, 'values_dir.txt')
 # ========================= EOF ====================================================================
