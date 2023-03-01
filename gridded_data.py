@@ -1,13 +1,15 @@
 import os
 import sys
 import json
+import time
 from calendar import monthrange
 
 import numpy as np
 import ee
 
 from utils.cdl import get_cdl
-from call_ee import ee_task_start, BASIN_STATES
+
+BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 sys.path.insert(0, os.path.abspath('..'))
 sys.setrecursionlimit(5000)
@@ -110,9 +112,9 @@ def get_field_itype(tables, bucket, year, description, join_col='OPENET_ID'):
             print(out_desc)
 
 
-def export_gridded_data(tables, bucket, years, description, features=None, check_exists=None,
-                        min_years=5, debug=False, join_col='STAID', geo_type='Polygon',
-                        gs_met=False, masks=True, volumes=True):
+def extract_area_data(tables, bucket, years, description, features=None, check_exists=None,
+                      min_years=5, debug=False, join_col='STAID', geo_type='Polygon',
+                      gs_met=False, masks=True, volumes=True):
     initialize()
     missing_files = None
     if check_exists:
@@ -275,30 +277,6 @@ def export_gridded_data(tables, bucket, years, description, features=None, check
                         ee_task_start(task)
                         print(out_desc)
 
-            elif geo_type == 'points':
-                for st in BASIN_STATES:
-                    st_points = fc.filterMetadata('STUSPS', 'equals', st)
-                    out_desc = '{}_{}_{}_{}'.format(description, st, yr, month)
-
-                    if check_exists and out_desc not in missing_files:
-                        continue
-
-                    plot_sample_regions = bands.sampleRegions(
-                        collection=st_points,
-                        scale=30,
-                        tileScale=16)
-
-                    task = ee.batch.Export.table.toCloudStorage(
-                        plot_sample_regions,
-                        description=out_desc,
-                        bucket='wudr',
-                        fileNamePrefix=out_desc,
-                        fileFormat='CSV',
-                        selectors=select_)
-
-                    ee_task_start(task)
-                    print(out_desc)
-
 
 def extract_corrected_etr(year, month):
     m_str = str(month).rjust(2, '0')
@@ -327,6 +305,19 @@ def initialize():
         print('Authorized')
     except Exception as e:
         print('You are not authorized: {}'.format(e))
+
+
+def ee_task_start(task, n=6):
+    """Make an exponential backoff Earth Engine request, credit cgmorton"""
+    for i in range(1, n):
+        try:
+            task.start()
+            break
+        except Exception as e:
+            print('    Resending query ({}/{})'.format(i, n))
+            time.sleep(i ** 2)
+
+    return task
 
 
 if __name__ == '__main__':
