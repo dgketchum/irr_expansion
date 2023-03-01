@@ -6,9 +6,10 @@ import fiona
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from sklearn.metrics import mean_squared_error
 from shapely.geometry import shape, mapping
 
-from training_data import PROPS
+from training_data import PROPS, BASIN_STATES
 
 DROP = ['left', 'right', 'top', 'bottom']
 UNCULT_CDL = [152,
@@ -128,6 +129,61 @@ def prep_extracts(in_dir, out_dir, clamp_et=False, indirect=False):
     print('av len data: {:.3f}'.format(np.mean(ldata)))
 
 
+def validate_predictions(csv_dir, out_csv, join_key='id', glob='None'):
+
+    l = [os.path.join(csv_dir, x) for x in os.listdir(csv_dir) if glob in x]
+    file_dct = {s: [c for c in l if s in c] for s in BASIN_STATES}
+    cols = ['eff_ppt_{}'.format(n) for n in range(4, 11)]
+    cols = cols + ['et_{}'.format(n) for n in range(4, 11)]
+    target_cols = ['{}_{}'.format(c, y) for c in cols for y in range(1987, 2022)]
+
+    mdf = pd.DataFrame(columns=['ept_sum', 'et_sum'])
+    for st, l in file_dct.items():
+        first = True
+        for csv in l:
+            splt = os.path.basename(csv).split('_')
+            y = int(splt[-1].split('.')[0])
+
+            print(os.path.basename(csv))
+
+            try:
+                if first:
+                    df = pd.read_csv(csv)
+                    df = df[df['slope'] < 3]
+                    df.index = df['id'].apply(lambda x: '{}_{}'.format(st, x))
+                    df.drop(columns=[join_key], inplace=True)
+                    df = df[cols]
+                    df.columns = ['{}_{}'.format(col, y) for col in list(df.columns)]
+                    dummy = pd.DataFrame(columns=['ept_sum', 'et_sum'], index=df.index)
+                    mdf = pd.concat([mdf, dummy], ignore_index=False)
+                    first = False
+                else:
+                    c = pd.read_csv(csv)
+                    c = c[c['slope'] < 3]
+                    c.index = c['id'].apply(lambda x: '{}_{}'.format(st, x))
+                    c.drop(columns=[join_key], inplace=True)
+                    c = c[cols]
+                    c.columns = ['{}_{}'.format(col, y) for col in list(c.columns)]
+                    df = pd.concat([df, c], axis=1)
+
+            except pd.errors.EmptyDataError:
+                print('{} is empty'.format(csv))
+                pass
+
+        assert np.all([c in df.columns for c in target_cols])
+        ept_cols, et_cols = [x for x in df.columns if 'eff_ppt' in x], [x for x in df.columns if 'et_' in x]
+        df['ept_sum'] = df[ept_cols].sum(axis=1)
+        df['et_sum'] = df[et_cols].sum(axis=1)
+        match = [i for i in mdf.index if i in df.index]
+        mdf.loc[match, ['ept_sum', 'et_sum']] = df.loc[match, ['ept_sum', 'et_sum']] / 35
+        mdf['diff'] = (mdf['et_sum'] - mdf['ept_sum']) / mdf['et_sum']
+
+    rmse = mean_squared_error(mdf['et_sum'], mdf['ept_sum'], squared=False)
+    mean_ = mdf['et_sum'].mean()
+    print(mean_, rmse)
+    df.to_csv(out_csv)
+
+
 def centroid_strip_attr(in_shp, out_shp):
     with fiona.open(in_shp, 'r') as src:
         meta = src.meta
@@ -158,5 +214,9 @@ if __name__ == '__main__':
     c_ = os.path.join(root, 'tables/validation/initial_filter')
     s_ = os.path.join(root, 'shapefiles/training_data/validation', 'validation_pts_initial_28FEB2023.shp')
     oshp = os.path.join(root, 'shapefiles/training_data/validation', 'validation_pts_28FEB2023.shp')
-    join_csv_shapefile(s_, c_, oshp, join_feat='id', find='uncult')
+    # join_csv_shapefile(s_, c_, oshp, join_feat='id', find='uncult')
+
+    v_csv = '/media/research/IrrigationGIS/expansion/tables/validation/csv/'
+    o_csv = '/media/research/IrrigationGIS/expansion/tables/validation/results/'
+    validate_predictions(v_csv, o_csv, join_key='id', glob='validation_28FEB2023')
 # ========================= EOF ====================================================================
