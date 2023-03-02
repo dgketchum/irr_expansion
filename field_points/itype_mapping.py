@@ -43,8 +43,7 @@ def itype():
             'S': 'Sprinkler',
             'F': 'Flood',
             'GRATED_PIPE': 'None',
-            'UNKNOWN': 'None',
-            }
+            'UNKNOWN': 'None'}
     return map_
 
 
