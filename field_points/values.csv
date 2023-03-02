@@ -1,0 +1,42 @@
+,file,desc,cdl_name,cdl_code
+0,cpvl_p17_t011.csv,Corn for Grain ,Corn,1
+1,cpvl_p18_t012.csv,Sorghum for Grain ,Sorghum,4
+2,cpvl_p19_t013.csv,Oat ,Oats,28
+3,cpvl_p20_t014.csv,Barley ,Barley,21
+5,cpvl_p22_t016.csv,Winter Wheat ,Winter Wheat,24
+6,cpvl_p23a_t017.csv,Other Spring Wheat ,Spring Wheat,23
+7,cpvl_p23b_t018.csv,Durum Wheat ,Durum Wheat,22
+10,cpvl_p25a_t021.csv,Rye ,Rye,27
+11,cpvl_p25b_t038.csv,Proso Millet ,Millet,29
+12,cpvl_p26_t022.csv,Soybeans for Beans ,Soybeans,5
+14,cpvl_p27b_t024.csv,Flaxseed ,Sod/Grass Seed,59
+15,cpvl_p28_t025.csv,Sunflower ,Sunflower,6
+16,cpvl_p29a_t039.csv,Canola ,Canola,31
+17,cpvl_p29b_t054.csv,Safflower ,Safflower,33
+20,cpvl_p31_t028.csv,Cotton ,Cotton,2
+22,cpvl_p33_t030.csv,Alfalfa Hay ,Alfalfa,36
+23,cpvl_p34_t031.csv,All Other Hay ,Other Hay/Non Alfalfa,37
+25,cpvl_p36a_t032.csv,Dry Edible Bean ,Dry Beans,42
+26,cpvl_p36b_t048.csv,Chickpea (Garbanzo Bean) ,Chick Peas,51
+27,cpvl_p37a_t033.csv,Dry Edible Pea ,Dry Beans,42
+28,cpvl_p37b_t034.csv,Wrinkled Seed Pea ,Peas,53
+29,cpvl_p38a_t035.csv,Austrian Winter Pea ,Winter Wheat,24
+30,cpvl_p38b_t036.csv,Lentil ,Lentils,52
+31,cpvl_p39_t037.csv,All Potatoes ,Potatoes,43
+36,cpvl_p43a_t042.csv,Sugarbeet ,Sugarbeets,41
+39,cpvl_p44b_t045.csv,Mint Oil ,Mint,14
+40,cpvl_p45a_t046.csv,Hops ,Hops,56
+42,cpvl_p10_t004.csv,Apples,Apples,68
+43,cpvl_p10_t004.csv,Cherries,Cherries,66
+44,cpvl_p10_t004.csv,Caneberries,Caneberries,55
+45,cpvl_p10_t004.csv,Grapes,Grapes,69
+46,cpvl_p10_t004.csv,Peaches,Peaches,67
+47,cpvl_p10_t004.csv,Pears,Pears,77
+48,cpvl_p08_t002.csv,Other Small Grains,Other Small Grains,25
+42,cpvl_p13_t007.csv,Asparagus,Asparagus,207
+43,cpvl_p13_t007.csv,Carrots,Carrots,206
+44,cpvl_p13_t007.csv,Sweet Corn,Sweet Corn,12
+45,cpvl_p13_t007.csv,Lettuce,Lettuce,227
+46,cpvl_p13_t007.csv,Onions,Onions,49
+47,cpvl_p13_t007.csv,Squash,Squash,222
+48,cpvl_p13_t007.csv,Peas,Peas,53
