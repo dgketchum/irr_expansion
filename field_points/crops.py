@@ -7,10 +7,11 @@ from pprint import pprint
 import numpy as np
 import pandas as pd
 import requests
-from fuzzywuzzy import fuzz, process
+from fuzzywuzzy import process
 
 from gridded_data import BASIN_STATES
 from utils.cdl import cdl_key, study_area_crops
+from utils.placenames import state_name_abbreviation
 
 
 def get_openet_cdl(in_dir, join_csv, out_dir):
@@ -136,12 +137,17 @@ def map_nass_to_csl(values_dir, txt):
 
     dct_choices = sorted([v[0] for k, v in cdl.items() if len(v[0]) > 3 and v[1] > 1000])
     inv_cdl = {v[0]: k for k, v in cdl.items()}
+    files = ['cpvl_p10_t004.csv', 'cpvl_p08_t002.csv', 'cpvl_p13_t007.csv']
 
-    for t, f in zip(['fruit', 'misc'], ['cpvl_p10_t004.csv', 'cpvl_p08_t002.csv']):
+    for f in files:
 
         table = pd.read_csv(os.path.join(values_dir, 'CropValuSu-02-24-2017', f),
                             skiprows=6, encoding_errors='ignore')
-        table.columns = ['4', 'h', 'name', 'unit', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+        try:
+            table.columns = ['4', 'h', 'name', 'unit', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+        except ValueError:
+            table.columns = ['4', 'h', 'name', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+
         table = table[['name', 'y_minus_3', 'y_minus_2', 'y_minus_1']]
         table.dropna(subset=['name'], inplace=True)
         table.dropna(subset=['y_minus_3', 'y_minus_2', 'y_minus_1'], how='all', inplace=True)
@@ -161,8 +167,37 @@ def map_nass_to_csl(values_dir, txt):
 
     df['cdl_name'] = df['desc'].apply(lambda x: process.extractOne(x, choices=dct_choices)[0])
     df['cdl_code'] = df['desc'].apply(lambda x: inv_cdl[process.extractOne(x, choices=dct_choices)[0]])
-    df.to_csv('values.csv')
+    df.to_csv('values_.csv')
     pass
+
+
+def get_price_timeseries(dir_, mapping, out_csv):
+    st_abv = state_name_abbreviation()
+    full_states = [st_abv[k] for k in BASIN_STATES]
+    cdl = study_area_crops()
+    m = pd.read_csv(mapping)
+    m.index = m['cdl_code']
+    m.drop(columns=['Unnamed: 0', 'cdl_code'], inplace=True)
+    files = m.T.to_dict()
+    dct = {}
+    for code, crop in cdl.items():
+        if code not in files.keys():
+            continue
+        for year in range(2009, 2022):
+            d = [x for x in os.listdir(dir_) if x.endswith(str(year))][0]
+            d = os.path.join(dir_, d)
+            t = [x for x in os.listdir(d) if files[code]['file'].split('_')[-1].replace('t', '') in x][0]
+            f = os.path.join(d, t)
+            c = pd.read_csv(f, skiprows=4, encoding_errors='ignore', header=None)
+            c['state'] = c[2]
+            c['yr_col'] = c[5]
+            if 'AZ' in c['state'].values:
+                c = c.loc[c['state'].apply(lambda x: True if x in BASIN_STATES else False)]
+            else:
+                c['state'] = [x.strip() if str(x).strip() in full_states else 'None' for x in list(c['state'])]
+                c = c.loc[c['state'].apply(lambda x: True if x in full_states else False)]
+            c = c[['state', 'yr_col']]
+            print(list(c.columns))
 
 
 if __name__ == '__main__':
@@ -185,6 +220,8 @@ if __name__ == '__main__':
     cdl_csv = '/media/research/IrrigationGIS/expansion/tables/cdl/accuracy/acc.json'
     # cdl_accuracy(cdl_csv)
 
-    price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value'
-    map_nass_to_csl(price_data, 'values_dir.txt')
+    price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data'
+    price_ts = '/media/research/IrrigationGIS/expansion/tables/crop_value/time_series.csv'
+    map_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/values.csv'
+    get_price_timeseries(price_data, map_, price_ts)
 # ========================= EOF ====================================================================
