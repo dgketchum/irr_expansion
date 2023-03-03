@@ -3,6 +3,62 @@ from collections import OrderedDict
 import ee
 
 
+def ppi_to_cdl_crop():
+    d = {'Farm Products': 'WPU01',
+         'Alfalfa': 'WPU01810101',
+         'Apples': 'WPUSI01102A',
+         # 'Asparagus': 'None',
+         'Barley': 'WPU01220101',
+         'Caneberries': 'WPS011102',
+         'Canola': 'WPU01830171',
+         'Carrots': 'WPU01130212',
+         'Cherries': 'WPS011102',
+         'Chick Peas': 'WPU01130109',
+         'Corn': 'WPU01220205',
+         'Cotton': 'WPU015',
+         'Dry Beans': 'WPU02840102',
+         'Durum Wheat': 'WPU0121',
+         'Grapes': 'WPU01110228',
+         'Hops': 'WPU0122',
+         'Lentils': 'WPU0122',
+         'Lettuce': 'WPU01130215',
+         'Millet': 'WPU0122',
+         # 'Mint': 'WPS011102',
+         'Oats': 'WPU012203',
+         'Onions': 'WPU01130216',
+         'Other Hay/Non Alfalfa': 'WPU0181',
+         'Other Small Grains': 'WPS012',
+         # 'Peaches': 'WPS011102',
+         'Pears': 'WPU01110221',
+         'Peas': 'WPU01130219',
+         'Potatoes': 'WPU011306',
+         'Rye': 'WPU0122',
+         'Safflower': 'WPS012',
+         'Sod/Grass Seed': 'WPU0181',
+         'Sorghum': 'WPU012205',
+         'Soybeans': 'WPU01830131',
+         'Spring Wheat': 'WPU01210102',
+         'Squash': 'WPU01130231',
+         'Sugarbeets': 'WPU02530702',
+         'Sunflower': 'WPU01830161',
+         'Sweet Corn': 'WPU01130214',
+         'Winter Wheat': 'WPU01210101'}
+    return d
+
+
+def ppi_to_cdl_code():
+    counts = study_area_crops()
+    ppi = ppi_to_cdl_crop()
+    dct = {}
+    for code in counts.keys():
+        if code in study_area_crops().keys():
+            try:
+                dct[code] = ppi[counts[code][0]]
+            except KeyError:
+                print(code, 'not in counts/ppi')
+    pass
+
+
 def study_area_crops():
     return OrderedDict([(36, ('Alfalfa', 2238577)),
                         (176, ('Grassland/Pasture', 1034576)),
@@ -439,5 +495,5 @@ def get_cdl(yr):
 
 
 if __name__ == '__main__':
-    pass
+    ppi_to_cdl_code()
 # ========================= EOF ====================================================================
