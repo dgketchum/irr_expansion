@@ -95,6 +95,7 @@ def get_monthly_price_timeseries(key, out_js):
 
     for code, query in queries.items():
         for year in range(2008, 2022):
+            print(code, year)
             query['year'] = year
             resp = nass_data(key, **query)
             if isinstance(resp, str):
@@ -109,6 +110,53 @@ def get_monthly_price_timeseries(key, out_js):
         json.dump(dct, fp, indent=4)
 
 
+def prepare_deflated_price_data(monthly_price, annual_price, ppi_data, out_csv):
+    pass
+
+
+def find_annual_price_tables(values_dir, txt):
+    cdl = study_area_crops()
+    df = pd.read_table(txt, header=None)
+    df.columns = ['index', 'file', 'desc']
+    df.drop(columns=['index'], inplace=True)
+    df['desc'] = df['desc'].apply(lambda x: x.split('Price per')[0])
+
+    dct_choices = sorted([v[0] for k, v in cdl.items() if len(v[0]) > 3 and v[1] > 1000])
+    inv_cdl = {v[0]: k for k, v in cdl.items()}
+    files = ['cpvl_p10_t004.csv', 'cpvl_p08_t002.csv', 'cpvl_p13_t007.csv']
+
+    for f in files:
+
+        table = pd.read_csv(os.path.join(values_dir, 'CropValuSu-02-24-2017', f),
+                            skiprows=6, encoding_errors='ignore')
+        try:
+            table.columns = ['4', 'h', 'name', 'unit', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+        except ValueError:
+            table.columns = ['4', 'h', 'name', 'y_minus_3', 'y_minus_2', 'y_minus_1']
+
+        table = table[['name', 'y_minus_3', 'y_minus_2', 'y_minus_1']]
+        table.dropna(subset=['name'], inplace=True)
+        table.dropna(subset=['y_minus_3', 'y_minus_2', 'y_minus_1'], how='all', inplace=True)
+
+        for i, r in table.iterrows():
+            approx = process.extractOne(r['name'], choices=dct_choices)
+            if approx[1] > 85:
+                print('match {} == {}'.format(r['name'], approx[0]))
+                test_exists = process.extractOne(r['name'], choices=df['desc'])
+                if test_exists[1] > 85:
+                    print('already in database, skipping')
+                else:
+                    print('appending')
+                    df = df.append({'file': f, 'desc': approx[0]}, ignore_index=True)
+            else:
+                print('nonmatch {} == {}'.format(r['name'], approx[0]))
+
+    df['cdl_name'] = df['desc'].apply(lambda x: process.extractOne(x, choices=dct_choices)[0])
+    df['cdl_code'] = df['desc'].apply(lambda x: inv_cdl[process.extractOne(x, choices=dct_choices)[0]])
+    df.to_csv('values_.csv')
+    pass
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -116,7 +164,7 @@ if __name__ == '__main__':
 
     key_ = '/home/dgketchum/quickstats_token.json'
     nass_price_monthly = '/media/research/IrrigationGIS/expansion/analysis/nass_price_monthly.json'
-    # get_monthly_price_timeseries(key_, nass_price_monthly)
+    get_monthly_price_timeseries(key_, nass_price_monthly)
 
     price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data'
     map_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/values.csv'
