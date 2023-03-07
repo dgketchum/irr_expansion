@@ -129,6 +129,41 @@ def transition_probability(cdl_npy, prices, out_matrix, glob='2MAR2023'):
     pass
 
 
+def cdl_area_timeseries(cdl_dir, area_json, out_json):
+    with open(area_json, 'r') as _file:
+        areas = json.load(_file)
+
+    area = pd.DataFrame(index=[k for k, v in areas.items()], data=[v for k, v in areas.items()], columns=['area'])
+
+    l = [os.path.join(cdl_dir, x) for x in os.listdir(cdl_dir)]
+    first = True
+    for csv in l:
+        if first:
+            df = pd.read_csv(csv, index_col='OPENET_ID')
+            first = False
+        else:
+            c = pd.read_csv(csv, index_col='OPENET_ID')
+            df = pd.concat([df, c])
+
+    match = [i for i in df.index if i in area.index]
+    df = df.loc[match]
+    df[df.values < 0] = np.nan
+    for c in df.columns:
+        area[c] = area['area']
+    area.drop(columns=['area'], inplace=True)
+
+    dct = {}
+    l = [int(c) for c in list(np.unique(df.values, return_counts=True)[0]) if np.isfinite(c) and c > 0]
+    for c in l:
+        a_vals, c_vals = area.values.copy(), df.values.copy()
+        a_vals[c_vals != c] = np.nan
+        dct[c] = list(np.nansum(a_vals, axis=0))
+        print(c, cdl_key()[c], '{:.3f}'.format(np.array(dct[c]).mean()))
+
+    with open(out_json, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -138,5 +173,10 @@ if __name__ == '__main__':
     transistion = '/media/research/IrrigationGIS/expansion/analysis/transition'
     ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi_cdl_monthly.csv'
     # transition_probability(met_cdl, ppi_, transistion)
+
+    crops = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
+    areas_ = '/media/research/IrrigationGIS/expansion/tables/cdl/fields_area.json'
+    cld_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timesereies.json'
+    cdl_area_timeseries(crops, areas_, cld_area_)
 
 # ========================= EOF ====================================================================
