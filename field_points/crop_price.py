@@ -5,11 +5,19 @@ import numpy as np
 import pandas as pd
 from fuzzywuzzy import process
 from nasspython.nass_api import nass_data
+from climate_indices.indices import spi, Distribution, compute
 
 from gridded_data import BASIN_STATES
 from utils.cdl import nass_monthly_price_queries, nass_annual_price_queries
-from utils.cdl import study_area_crops, ppi_to_cdl_code
+from utils.cdl import study_area_crops, ppi_to_cdl_crop
 from utils.placenames import state_name_abbreviation
+
+KWARGS = dict(scale=9,
+              distribution=Distribution.gamma,
+              data_start_year=2007,
+              calibration_year_initial=2007,
+              calibration_year_final=2021,
+              periodicity=compute.Periodicity.monthly)
 
 
 def get_annual_price_timeseries(dir_, mapping, out_js, key):
@@ -102,7 +110,7 @@ def get_monthly_price_timeseries(key, out_js):
     dct = {c: {s: [] for s in states} for c in queries.keys()}
 
     for code, query in queries.items():
-        for year in range(2008, 2022):
+        for year in range(2007, 2022):
             print(code, year)
             query['year'] = year
             resp = nass_data(key, **query)
@@ -130,7 +138,7 @@ def _from_series(tseries, state):
     return series
 
 
-def join_price_data(monthly_price, annual_price, nominal):
+def nominal_price_data(monthly_price, annual_price, nominal):
     st_names = state_name_abbreviation()
     st_abv = {v.upper(): k for k, v in st_names.items() if k in BASIN_STATES}
 
@@ -143,7 +151,7 @@ def join_price_data(monthly_price, annual_price, nominal):
 
     counts = study_area_crops()
     counts = {k: v for k, v in counts.items() if v[0] in month_price.keys() or v[0] in annual_price.keys()}
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2008, 2022) for m in range(1, 13)]
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2007, 2022) for m in range(1, 13)]
     start, end = dt_range[0], dt_range[-1]
     missing_state = None
 
@@ -164,7 +172,7 @@ def join_price_data(monthly_price, annual_price, nominal):
 
         c = pd.DataFrame(columns=[s for s in BASIN_STATES])
         c = c.reindex(dt_range)
-        c = c.loc['2008-01-01': '2021-12-31']
+        c = c.loc['2007-01-01': '2021-12-31']
 
         if annual and national:
             series = _from_series(ts, 'CA')
@@ -216,6 +224,37 @@ def join_price_data(monthly_price, annual_price, nominal):
         c.to_csv(o_file)
 
 
+def normalized_price_data(nominal, ppi, deflated):
+    code_table = {v: k for k, v in ppi_to_cdl_crop().items()}
+
+    df = pd.read_csv(ppi, index_col='DATE', infer_datetime_format=True, parse_dates=True)
+    df = df.loc['2007-01-01': '2021-12-31']
+    scale = df.loc['2021-12-01'] / 100
+    df = df / scale
+    df.columns = [code_table[k] if k in code_table.keys() else k for k in df.columns]
+    df = df.interpolate(method='linear', axis=0, limit=5)
+    df = df.dropna(how='any', axis=1)
+
+    l = [os.path.join(nominal, x) for x in os.listdir(nominal)]
+    for csv in l:
+
+        crop = os.path.basename(csv).strip('.csv')
+        c = pd.read_csv(csv, infer_datetime_format=True, parse_dates=True, index_col=0)
+
+        if crop in df.columns:
+            c = c.div(df[crop].div(100, axis=0), axis=0)
+        else:
+            c = c.div(df['Farm Products'].div(100, axis=0), axis=0)
+
+        for col in c.columns:
+            c[col] = spi(c[col], **KWARGS)
+
+        o_file = os.path.join(deflated, '{}.csv'.format(crop))
+        print(o_file)
+        c = c.loc['2008-01-01':]
+        c.to_csv(o_file)
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -231,8 +270,9 @@ if __name__ == '__main__':
     # get_annual_price_timeseries(price_data, map_, nass_price_annual, key_)
 
     nominal_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/nominal'
-    join_price_data(nass_price_monthly, nass_price_annual, nominal_)
+    # nominal_price_data(nass_price_monthly, nass_price_annual, nominal_)
 
-    ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi_cdl_monthly.csv'
-
+    ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi/ppi_cdl_monthly.csv'
+    deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'
+    normalized_price_data(nominal_, ppi_, deflated)
 # ========================= EOF ====================================================================
