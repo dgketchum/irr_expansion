@@ -6,12 +6,9 @@ from pprint import pprint
 
 import numpy as np
 import pandas as pd
-import requests
-from fuzzywuzzy import process
 
 from gridded_data import BASIN_STATES
-from utils.cdl import cdl_key, study_area_crops
-from utils.placenames import state_name_abbreviation
+from utils.cdl import cdl_key
 
 
 def get_openet_cdl(in_dir, join_csv, out_dir):
@@ -57,187 +54,79 @@ def get_openet_cdl(in_dir, join_csv, out_dir):
     pprint(dct)
 
 
-def transition_probability(cdl_npy, out_matrix):
+def transition_probability(cdl_npy, prices, out_matrix, glob='2MAR2023'):
+    counts, set_ = None, None
     cdl = cdl_key()
-    cdl = {k: v[1] for k, v in cdl.items()}
+
     time_series_length = 17
-    classes = ['Grain', 'Vegetable', 'Forage', 'Orchard', 'Uncultivated', 'Fallow']
+    df = None
 
     rec = np.fromfile(cdl_npy, dtype=float).reshape((4, -1, time_series_length))
-    rec = rec[:, np.random.randint(0, rec.shape[1], int(1e6)), :]
-    codes = np.where(rec[3] < 0, np.zeros_like(rec[3]), rec[3])
-    codes = np.vectorize(cdl.get)(codes)
-    rec[3] = codes
+    set_, classes = list(df.columns), [cdl[c][0] for c in df.columns]
 
-    set_ = list(np.unique(rec[3]))
+    set_ = [s for s in set_ if s > 0]
     keys = list((combinations(set_, 2)))
     opposites = [(s, f) for f, s in keys]
     [keys.append(o) for o in opposites]
     [keys.append((i, i)) for i in set_]
     keys = [(int(a), int(b)) for a, b in keys]
-    dct = {clime: {k: 0 for k in keys} for clime in ['Wet', 'Normal', 'Dry', 'Driest']}
     rec = np.moveaxis(rec, 0, 1)
 
-    for v in rec:
+    counts = {k: 0 for k in keys}
+    from_crop = {k: [] for k in keys}
+    to_crop = {k: [] for k in keys}
+    spei = {k: [] for k in keys}
+
+    df = df.to_dict()
+    df = {k: {kk.strftime('%Y-%m-%d'): vv for kk, vv in v.items()} for k, v in df.items()}
+
+    ct = 0
+    for i, v in enumerate(rec):
         for e, c in enumerate(v.T):
-            if e == 16:
-                continue
-            if c[1] >= 0:
-                clime = 'Wet'
-            elif 0 > c[1] > -1.3:
-                clime = 'Normal'
-            elif -2 < c[1] < -1.3:
-                clime = 'Dry'
-            else:
-                clime = 'Driest'
-
-            # trans = (int(v.T[e - 1, 3]), int(c[3]))
-            trans = (int(c[3]), int(v.T[e + 1, 3]))
-            dct[clime][trans] += 1
-
-    for k, d in dct.items():
-        map = np.zeros((len(classes), len(classes)))
-        for r, c in d.keys():
-            map[r - 1, c - 1] = d[r, c]
-        prob = np.divide(map, np.sum(map, axis=0))
-        tdf = pd.DataFrame(columns=classes, index=classes, data=prob)
-        print(k)
-        print(tdf, '\n')
-        out_file = os.path.join(out_matrix, '{}.csv'.format(k.lower()))
-        tdf.to_csv(out_file, float_format='%.3f')
-
-    pass
-
-
-def cdl_accuracy(out_js):
-    dct = {s: [] for s in BASIN_STATES}
-    for y in range(2008, 2022):
-        for s in BASIN_STATES:
-            url = 'https://www.nass.usda.gov/Research_and_Science/' \
-                  'Cropland/metadata/metadata_{}{}.htm'.format(s.lower(), str(y)[-2:])
-            resp = requests.get(url).content.decode('utf-8')
-            for i in resp.split('\n'):
-                txt = i.strip('\r')
-                if txt.startswith('OVERALL'):
-                    l = txt.split(' ')
-                    k = float(l[-1])
-            dct[s].append(k)
-            print(s, y, '{:.3f}'.format(k))
-
-    with open(out_js, 'w') as fp:
-        json.dump(dct, fp, indent=4)
-
-
-def map_nass_to_csl(values_dir, txt):
-    cdl = study_area_crops()
-    df = pd.read_table(txt, header=None)
-    df.columns = ['index', 'file', 'desc']
-    df.drop(columns=['index'], inplace=True)
-    df['desc'] = df['desc'].apply(lambda x: x.split('Price per')[0])
-
-    dct_choices = sorted([v[0] for k, v in cdl.items() if len(v[0]) > 3 and v[1] > 1000])
-    inv_cdl = {v[0]: k for k, v in cdl.items()}
-    files = ['cpvl_p10_t004.csv', 'cpvl_p08_t002.csv', 'cpvl_p13_t007.csv']
-
-    for f in files:
-
-        table = pd.read_csv(os.path.join(values_dir, 'CropValuSu-02-24-2017', f),
-                            skiprows=6, encoding_errors='ignore')
-        try:
-            table.columns = ['4', 'h', 'name', 'unit', 'y_minus_3', 'y_minus_2', 'y_minus_1']
-        except ValueError:
-            table.columns = ['4', 'h', 'name', 'y_minus_3', 'y_minus_2', 'y_minus_1']
-
-        table = table[['name', 'y_minus_3', 'y_minus_2', 'y_minus_1']]
-        table.dropna(subset=['name'], inplace=True)
-        table.dropna(subset=['y_minus_3', 'y_minus_2', 'y_minus_1'], how='all', inplace=True)
-
-        for i, r in table.iterrows():
-            approx = process.extractOne(r['name'], choices=dct_choices)
-            if approx[1] > 85:
-                print('match {} == {}'.format(r['name'], approx[0]))
-                test_exists = process.extractOne(r['name'], choices=df['desc'])
-                if test_exists[1] > 85:
-                    print('already in database, skipping')
-                else:
-                    print('appending')
-                    df = df.append({'file': f, 'desc': approx[0]}, ignore_index=True)
-            else:
-                print('nonmatch {} == {}'.format(r['name'], approx[0]))
-
-    df['cdl_name'] = df['desc'].apply(lambda x: process.extractOne(x, choices=dct_choices)[0])
-    df['cdl_code'] = df['desc'].apply(lambda x: inv_cdl[process.extractOne(x, choices=dct_choices)[0]])
-    df.to_csv('values_.csv')
-    pass
-
-
-def get_price_timeseries(dir_, mapping, out_js):
-    st_abv = state_name_abbreviation()
-    inv_st_abv = {v: k for k, v in st_abv.items()}
-    cdl = study_area_crops()
-    m = pd.read_csv(mapping)
-    m['table'] = m['file'].apply(lambda x: x.split('.')[0][-3:])
-    m.index = m['cdl_code']
-    m.drop(columns=['Unnamed: 0', 'cdl_code', 'file', 'desc'], inplace=True)
-    tables = m.T.to_dict()
-    dct, target_year = {}, {}
-    for i, (code, (crop, count)) in enumerate(cdl.items()):
-        if code not in tables.keys():
-            continue
-        table = tables[code]['table']
-        dct[code] = {s: (crop, []) for s in BASIN_STATES}
-        years = list(range(2003, 2023))
-        years.reverse()
-        for year in years:
-            if year > 2019:
-                target_col = 5
-            elif table == '004':
-                target_col = 4
-            else:
-                target_col = 3
-            d = [x for x in os.listdir(dir_) if x.endswith(str(year))][0]
-            d = os.path.join(dir_, d)
-
-            try:
-                t = [x for x in os.listdir(d) if table in x][0]
-            except IndexError:
-                print(i, year, crop, count, 'no table')
+            # skip last year of series, and first three (null) years
+            if e == 16 or e < 2:
                 continue
 
-            f = os.path.join(d, t)
+            fc, tc = int(c[3]), int(v.T[e + 1, 3])
+            trans = (fc, tc)
+            if not (trans[0] in set_ and trans[1] in set_):
+                continue
 
-            try:
-
-                if table in ['004', '007', '002']:
-                    c = pd.read_csv(f, skiprows=9, encoding_errors='ignore', header=None)
-                    ind = list(c[2]).index(process.extractOne(crop, choices=c[2])[0])
-                    p = float(c.loc[ind, 4])
-                    for s in BASIN_STATES:
-                        dct[code][s][1].append((year, float(p)))
-                else:
-                    c = pd.read_csv(f, skiprows=7, encoding_errors='ignore', header=None)
-                    c['state'] = c[2]
-                    c['yr_col'] = c[target_col]
-                    if 'AZ' in c['state'].values:
-                        c = c.loc[c['state'].apply(lambda x: True if x in BASIN_STATES else False)]
-                    else:
-                        c['state'] = [inv_st_abv[x.strip()] if str(x).strip() in inv_st_abv.keys()
-                                      else 'None' for x in list(c['state'])]
-                        c = c.loc[c['state'].apply(lambda x: True if x in BASIN_STATES else False)]
-                    c = c[['state', 'yr_col']]
-
-                    for s, p in zip(c['state'], c['yr_col']):
-                        try:
-                            dct[code][s][1].append((year, float(p)))
-                        except ValueError:
-                            dct[code][s][1].append((year, np.nan))
-
-            except pd.errors.ParserError as e:
-                print(i, year, crop)
+            y = e + 2005
+            counts[trans] += 1
+            dtstr = '{}-01-01'.format(y)
+            from_crop[trans].append(df[fc][dtstr])
+            to_crop[trans].append(df[tc][dtstr])
+            spei[trans].append(c[1])
+            ct += 1
+            if fc != tc:
                 pass
 
-    with open(out_js, 'w') as fp:
-        json.dump(dct, fp, indent=4)
+        if i % 10000 == 0.:
+            print(i)
+
+    print('{} transtions'.format(ct))
+    map = np.zeros((len(classes), len(classes)))
+    for r, c in counts.keys():
+        map[set_.index(r), set_.index(c)] = counts[r, c]
+
+    prob = np.divide(map, np.sum(map, axis=0))
+
+    tdf = pd.DataFrame(columns=classes, index=classes, data=prob)
+    out_file = os.path.join(out_matrix, 'transitions_{}_crop.csv'.format(len(set_)))
+    tdf.to_csv(out_file, float_format='%.3f')
+
+    tdf = pd.DataFrame(columns=classes, index=classes, data=map)
+    out_file = os.path.join(out_matrix, 'transitions_{}_crop_counts.csv'.format(len(set_)))
+    tdf.to_csv(out_file, float_format='%.0f')
+
+    outs = zip([counts, from_crop, to_crop, spei], ['counts', 'fc_ppi', 'tc_ppi', 'spei'])
+    for d, js in outs:
+        d = {'{}'.format(k): v for k, v in d.items()}
+        out_js = os.path.join(out_matrix, '{}_{}.json'.format(js, glob))
+        with open(out_js, 'w') as fp:
+            json.dump(d, fp, indent=4)
+    pass
 
 
 if __name__ == '__main__':
@@ -245,10 +134,9 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS'
 
-    price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data'
-    map_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/values.csv'
-    # map_nass_to_csl(price_data, map_)
+    met_cdl = '/media/nvm/field_pts/fields_data/partitioned_npy/cdl/met4_ag3_fr8.npy'
+    transistion = '/media/research/IrrigationGIS/expansion/analysis/transition'
+    ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi_cdl_monthly.csv'
+    # transition_probability(met_cdl, ppi_, transistion)
 
-    price_ts = '/media/research/IrrigationGIS/expansion/tables/crop_value/time_series.json'
-    get_price_timeseries(price_data, map_, price_ts)
 # ========================= EOF ====================================================================

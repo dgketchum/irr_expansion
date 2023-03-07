@@ -110,7 +110,7 @@ def partition_cdl_response(npy, out_fig):
     timescales = list(set([os.path.basename(n).strip('.npy') for n in files]))
     timescales.sort()
 
-    classes = ['Grain', 'Vegetable', 'Forage', 'Orchard']
+    classes = ['Grain', 'Vegetable', 'Forage', 'Orchard', 'Uncultivated', 'Fallow']
     classes = {i + 1: classes[i] for i in range(len(classes))}
     cdl = cdl_key()
 

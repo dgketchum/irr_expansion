@@ -1,6 +1,15 @@
+import json
+from copy import copy
 from collections import OrderedDict
 
 import ee
+import requests
+
+BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
+KWARGS = dict(source_desc='SURVEY', sector_desc='CROPS', group_desc=None, commodity_desc=None, short_desc=None,
+              domain_desc=None, agg_level_desc='STATE', domaincat_desc=None, statisticcat_desc=None,
+              state_name=None, asd_desc=None, county_name=None, region_desc=None, zip_5=None,
+              watershed_desc=None, year=None, freq_desc=None, reference_period_desc=None)
 
 
 def ppi_to_cdl_crop():
@@ -47,16 +56,150 @@ def ppi_to_cdl_crop():
 
 
 def ppi_to_cdl_code():
-    counts = study_area_crops()
-    ppi = ppi_to_cdl_crop()
-    dct = {}
-    for code in counts.keys():
-        if code in study_area_crops().keys():
-            try:
-                dct[code] = ppi[counts[code][0]]
-            except KeyError:
-                print(code, 'not in counts/ppi')
-    pass
+    d = {1: 'WPU01220205',
+         2: 'WPU015',
+         4: 'WPU012205',
+         5: 'WPU01830131',
+         6: 'WPU01830161',
+         12: 'WPU01130214',
+         21: 'WPU01220101',
+         22: 'WPU0121',
+         23: 'WPU01210102',
+         24: 'WPU01210101',
+         25: 'WPS012',
+         27: 'WPU0122',
+         28: 'WPU012203',
+         29: 'WPU0122',
+         31: 'WPU01830171',
+         33: 'WPS012',
+         36: 'WPU01810101',
+         37: 'WPU0181',
+         41: 'WPU02530702',
+         42: 'WPU02840102',
+         43: 'WPU011306',
+         49: 'WPU01130216',
+         51: 'WPU01130109',
+         52: 'WPU0122',
+         53: 'WPU01130219',
+         55: 'WPS011102',
+         56: 'WPU0122',
+         59: 'WPU0181',
+         66: 'WPS011102',
+         68: 'WPUSI01102A',
+         69: 'WPU01110228',
+         77: 'WPU01110221',
+         206: 'WPU01130212',
+         222: 'WPU01130231',
+         227: 'WPU01130215'}
+    return d
+
+
+def nass_annual_price_queries():
+    kwargs = copy(KWARGS)
+    kwargs.update({'freq_desc': 'ANNUAL'})
+    queries = OrderedDict([('Rye', dict([('commodity_desc', 'RYE'),
+                                         ('short_desc', 'RYE - PRICE RECEIVED, MEASURED IN $ / BU')]))])
+
+    kwargs = {k: v for k, v in kwargs.items() if v}
+    keys = list(queries.keys())
+    for k in keys:
+        queries[k].update(kwargs)
+
+    return queries
+
+
+def nass_monthly_price_queries():
+    kwargs = copy(KWARGS)
+    kwargs.update({'freq_desc': 'MONTHLY'})
+
+    queries = OrderedDict([('Alfalfa', dict([('commodity_desc', 'HAY'),
+                                             ('short_desc', 'HAY, ALFALFA - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Other Hay/Non Alfalfa', dict([('commodity_desc', 'HAY'),
+                                                           ('short_desc',
+                                                            'HAY, (EXCL ALFALFA) - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Corn', dict([('commodity_desc', 'CORN'),
+                                          ('short_desc', 'CORN, GRAIN - PRICE RECEIVED, MEASURED IN $ / BU')])),
+
+                           ('Barley', dict([('commodity_desc', 'BARLEY'),
+                                            ('short_desc', 'BARLEY - PRICE RECEIVED, MEASURED IN $ / BU')])),
+
+                           ('Winter Wheat', dict([('commodity_desc', 'WHEAT'),
+                                                  ('short_desc',
+                                                   'WHEAT, WINTER - PRICE RECEIVED, MEASURED IN $ / BU')])),
+
+                           ('Spring Wheat', dict([('commodity_desc', 'WHEAT'),
+                                                  ('short_desc',
+                                                   'WHEAT, SPRING, (EXCL DURUM) - PRICE RECEIVED, MEASURED IN $ / BU')])),
+
+                           ('Apples', dict([('commodity_desc', 'APPLES'),
+                                            ('short_desc',
+                                             'APPLES, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / LB')])),
+
+                           ('Potatoes', dict([('commodity_desc', 'POTATOES'),
+                                              ('short_desc',
+                                               'POTATOES, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Lettuce', dict([('commodity_desc', 'LETTUCE'),
+                                             ('short_desc',
+                                              'LETTUCE, HEAD, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Sugarbeets', dict([('commodity_desc', 'SUGARBEETS'),
+                                                ('short_desc',
+                                                 'SUGARBEETS - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Dry Beans', dict([('commodity_desc', 'BEANS'),
+                                               ('short_desc',
+                                                'BEANS, DRY EDIBLE, INCL CHICKPEAS - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Grapes', dict([('commodity_desc', 'GRAPES'),
+                                            ('short_desc',
+                                             'GRAPES, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Pears', dict([('commodity_desc', 'PEARS'),
+                                           ('short_desc',
+                                            'PEARS, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Carrots', dict([('commodity_desc', 'CARROTS'),
+                                             ('short_desc',
+                                              'CARROTS, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Hops', dict([('commodity_desc', 'HOPS'),
+                                          ('short_desc', 'HOPS - PRICE RECEIVED, MEASURED IN $ / LB')])),
+
+                           ('Sweet Corn', dict([('commodity_desc', 'SWEET CORN'),
+                                                ('short_desc',
+                                                 'SWEET CORN, FRESH MARKET - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Sorghum', dict([('commodity_desc', 'SORGHUM'),
+                                             ('short_desc', 'SORGHUM, GRAIN - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Squash', dict([('commodity_desc', 'SQUASH'),
+                                            ('short_desc', 'SQUASH - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Soybeans', dict([('commodity_desc', 'SOYBEANS'),
+                                              ('short_desc', 'SOYBEANS - PRICE RECEIVED, MEASURED IN $ / BU')])),
+
+                           ('Potatoes', dict([('commodity_desc', 'POTATOES'),
+                                              ('short_desc', 'POTATOES - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           # ('Canola', dict([('commodity_desc', 'HAY'),
+                           #                  ('short_desc', 'HAY, ALFALFA - PRICE RECEIVED, MEASURED IN $ / TON')])),
+
+                           ('Sunflower', dict([('commodity_desc', 'SUNFLOWER'),
+                                               ('short_desc', 'SUNFLOWER - PRICE RECEIVED, MEASURED IN $ / CWT')])),
+
+                           ('Onions', dict([('commodity_desc', 'ONIONS'),
+                                            ('short_desc',
+                                             'ONIONS, DRY, SPRING - PRICE RECEIVED, MEASURED IN $ / CWT')]))])
+
+    kwargs = {k: v for k, v in kwargs.items() if v}
+    keys = list(queries.keys())
+    for k in keys:
+        queries[k].update(kwargs)
+
+    return queries
 
 
 def study_area_crops():
@@ -72,7 +215,7 @@ def study_area_crops():
                         (43, ('Potatoes', 202253)),
                         (121, ('Developed/Open Space', 183478)),
                         (61, ('Fallow/Idle Cropland', 147398)),
-                        (59, ('Sod/Grass Seed', 132879)),
+                        # (59, ('Sod/Grass Seed', 132879)),
                         (41, ('Sugarbeets', 110129)),
                         (42, ('Dry Beans', 101632)),
                         (69, ('Grapes', 70741)),
@@ -494,6 +637,25 @@ def get_cdl(yr):
     return cultivated, crop, simple_crop
 
 
+def cdl_accuracy(out_js):
+    dct = {s: [] for s in BASIN_STATES}
+    for y in range(2008, 2022):
+        for s in BASIN_STATES:
+            url = 'https://www.nass.usda.gov/Research_and_Science/' \
+                  'Cropland/metadata/metadata_{}{}.htm'.format(s.lower(), str(y)[-2:])
+            resp = requests.get(url).content.decode('utf-8')
+            for i in resp.split('\n'):
+                txt = i.strip('\r')
+                if txt.startswith('OVERALL'):
+                    l = txt.split(' ')
+                    k = float(l[-1])
+            dct[s].append(k)
+            print(s, y, '{:.3f}'.format(k))
+
+    with open(out_js, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 if __name__ == '__main__':
-    ppi_to_cdl_code()
+    pass
 # ========================= EOF ====================================================================
