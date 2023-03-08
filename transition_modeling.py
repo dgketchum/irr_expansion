@@ -6,6 +6,8 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 import pymc as pm
+import aesara
+import aesara.tensor as tt
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -36,33 +38,27 @@ def dirichlet_regression(climate, from_price, to_price, from_crop=24):
 
     combo = list(zip(c_data, fp_data, tp_data, labels))
     random.shuffle(combo)
-    c_data[:], fp_data[:], tp_data[:], labels[:] = zip(*combo)
+    c_data[:], fp_data[:], tp_data[:], labels[:] = zip(*combo[:100])
 
-    obs = np.array([label_ct]) / np.array([label_ct]).sum()
-    coords = {'climate': c_data, 'to_price': tp_data, 'predictors': ['climate', 'to_price'],
-              'outcome': crop_codes, 'origination': [from_crop]}
+    s = pd.Series(labels)
+    obs = pd.get_dummies(s).values
+    n, k = obs.shape
 
-    intercept = np.ones_like(obs)
+    c = aesara.shared(np.array(c_data))
 
-    with pm.Model(coords=coords) as model_diri:
-        # intercept = pm.Normal('inter', 0, sigma=20, dims=('outcome', ))
-        a = pm.Normal('climate', 0, sigma=20, dims=('outcome', ))
-        b = pm.Normal('price', 0, sigma=20, dims=('outcome', ))
+    with pm.Model() as dmr_model:
+        a = pm.Normal('a', mu=0, sigma=1, shape=k)
+        b = pm.Normal('b', mu=0, sigma=1, shape=k)
 
-        true_c = pm.Normal('true_climate', mu=0, sigma=20, shape=len(c_data))
-        true_p = pm.Normal('true_price', mu=0, sigma=20, shape=len(tp_data))
+        alpha = pm.Deterministic('alpha', pm.math.exp(a + tt.outer(c, b)))
 
-        likelihood_c = pm.Normal('c', mu=true_c, sigma=20, observed=c_data)
-        likelihood_p = pm.Normal('p', mu=true_p, sigma=20, observed=tp_data)
+        p = pm.Dirichlet('p', a=alpha, shape=(n, k))
 
-        e = a * intercept + b * c_data + c * tp_data
-        eta = pm.Deterministic("eta", e, dims=('origination', 'outcome'))
+        F = pm.Multinomial('F', 1, p, observed=obs)
 
-        mu = pm.Deterministic("mu", pm.math.exp(eta), dims=('origination', 'outcome'))
+        trace = pm.sample(5000, tune=10000, target_accept=0.9)
 
-        y = pm.Dirichlet("y", mu, observed=obs, dims=('origination', 'outcome'))
-
-    pm.model_to_graphviz(model_diri).view()
+    # pm.model_to_graphviz(dmr_model).view()
 
 
 def crop_transitions(cdl_npy, price_files, out_matrix):
