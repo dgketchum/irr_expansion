@@ -1,4 +1,5 @@
 import os
+import json
 import random
 
 import numpy as np
@@ -7,52 +8,6 @@ import pandas as pd
 from shapely.geometry import Point
 
 from gridded_data import BASIN_STATES
-
-
-def generate_random(polygon):
-    minx, miny, maxx, maxy = polygon.bounds
-    a = polygon.area
-    p = (4 * np.pi * polygon.area) / (polygon.boundary.length ** 2.)
-
-    if a < 1e5 or p < 0.6:
-        buff = 0.
-        centr = polygon.centroid
-        if polygon.contains(centr):
-            return centr
-    else:
-        buff = -100
-
-    ct = 0
-    while True:
-        pnt = Point(random.uniform(minx, maxx), random.uniform(miny, maxy))
-        if polygon.buffer(buff).contains(pnt):
-            return pnt
-        ct += 1
-        if ct > 10000:
-            print('{:.3f}, {:.3f}, {}'.format(a, p, ct))
-            return None
-
-
-def random_point(poly_dir, irr_cnt, out_rand):
-    c = gpd.read_file(irr_cnt)
-    c['STATE'] = c['OPENET_ID'].apply(lambda x: x[:2])
-    for s in BASIN_STATES:
-        d = c[c['STATE'] == s].copy()
-        print(s, d.shape[0])
-        ids = d['OPENET_ID'].values
-        p_file = os.path.join(poly_dir, '{}.shp'.format(s))
-        polys = gpd.read_file(p_file)
-        polys = polys.loc[polys['geometry'].is_valid, :]
-        polys = polys[['OPENET_ID', 'geometry']]
-        polys['INCL'] = polys['OPENET_ID'].apply(lambda x: x in ids)
-        polys = polys[polys['INCL']]
-        polys['point'] = polys['geometry'].apply(lambda x: generate_random(x))
-        polys = polys.dropna()
-        polys['geometry'] = polys['point']
-        polys['rand'] = np.random.rand(polys.shape[0], 1)
-        polys = polys[['OPENET_ID', 'rand', 'geometry']]
-        polys.to_file(out_rand.format(s), crs='epsg:5071', geometry='geometry')
-        print(polys.shape[0], out_rand.format(s))
 
 
 def state_csv(shape, out_dir):
@@ -115,6 +70,19 @@ def get_state_fields(points, attrs, fields, out_dir):
         print(out_, df.shape[0], '\n')
 
 
+def field_areas(fields, out_json):
+    dct = {}
+    for s in BASIN_STATES:
+        print(s)
+        cfile = os.path.join(fields, '{}.shp'.format(s))
+        df = gpd.read_file(cfile, index_col='OPENET_ID')
+        for i, r in df.iterrows():
+            dct[r['OPENET_ID']] = r['geometry'].area / 1e6
+
+    with open(out_json, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 if __name__ == '__main__':
     root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
@@ -125,5 +93,8 @@ if __name__ == '__main__':
     fields_shp = '/media/nvm/field_pts/fields_data/fields_shp'
     usbr_attr = '/media/nvm/field_pts/usbr_attr'
     # get_state_fields(inshp, usbr_attr, fields_, fields_shp)
+
+    fields_area = '/media/research/IrrigationGIS/expansion/analysis/fields_area.json'
+    field_areas(fields_shp, fields_area)
 
 # ========================= EOF ====================================================================
