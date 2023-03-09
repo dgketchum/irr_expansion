@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from call_ee import BASIN_STATES
+from gridded_data import BASIN_STATES
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 
