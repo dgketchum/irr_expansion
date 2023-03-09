@@ -10,7 +10,8 @@ from fuzzywuzzy import process
 from utils.cdl import cdl_key
 
 
-def planting_area_prediction(price_csv, area_js):
+def planting_area_prediction(price_csv, area_js, files_js):
+    # TODO: find a timescale for all transitions, testing with MLR on the from-crop price and the to-crop price
     with open(area_js, 'r') as _file:
         areas = json.load(_file)
 
@@ -22,13 +23,13 @@ def planting_area_prediction(price_csv, area_js):
     cdl = cdl_key()
     bnames = [c for c in os.listdir(price_csv)]
     code_files = {k: process.extractOne(v[0], bnames)[0] for k, v in cdl.items() if len(v[0]) > 0}
-    code_files = {k: os.path.join(price_csv, v) for k, v in code_files.items()}
+    code_files = {k: os.path.join(price_csv, v) for k, v in code_files.items() if k in incl}
 
     lags, areas_l = [], []
     for c, area in areas.items():
-        if c not in incl:
-            continue
         crop = cdl[c][0]
+        if c not in code_files.keys():
+            continue
         price = pd.read_csv(code_files[c], index_col=0, infer_datetime_format=True, parse_dates=True)
         price = price.mean(axis=1)
         r_max, p_min, opt_lag = 0, 1, 0
@@ -49,9 +50,13 @@ def planting_area_prediction(price_csv, area_js):
     weighted_lags = weights * np.array(lags)
     print(np.sum(weighted_lags))
 
+    with open(files_js, 'w') as fp:
+        json.dump(code_files, fp, indent=4)
+
 
 if __name__ == '__main__':
     deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'
+    files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'
     cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timesereies.json'
-    planting_area_prediction(deflated, cdl_area_)
+    planting_area_prediction(deflated, cdl_area_, files_)
 # ========================= EOF ====================================================================
