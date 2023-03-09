@@ -14,8 +14,8 @@ from utils.placenames import state_name_abbreviation
 
 KWARGS = dict(scale=9,
               distribution=Distribution.gamma,
-              data_start_year=2007,
-              calibration_year_initial=2007,
+              data_start_year=2006,
+              calibration_year_initial=2006,
               calibration_year_final=2021,
               periodicity=compute.Periodicity.monthly)
 
@@ -110,7 +110,7 @@ def get_monthly_price_timeseries(key, out_js):
     dct = {c: {s: [] for s in states} for c in queries.keys()}
 
     for code, query in queries.items():
-        for year in range(2007, 2022):
+        for year in range(2006, 2022):
             print(code, year)
             query['year'] = year
             resp = nass_data(key, **query)
@@ -151,7 +151,7 @@ def nominal_price_data(monthly_price, annual_price, nominal):
 
     counts = study_area_crops()
     counts = {k: v for k, v in counts.items() if v[0] in month_price.keys() or v[0] in annual_price.keys()}
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2007, 2022) for m in range(1, 13)]
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2006, 2022) for m in range(1, 13)]
     start, end = dt_range[0], dt_range[-1]
     missing_state = None
 
@@ -172,7 +172,7 @@ def nominal_price_data(monthly_price, annual_price, nominal):
 
         c = pd.DataFrame(columns=[s for s in BASIN_STATES])
         c = c.reindex(dt_range)
-        c = c.loc['2007-01-01': '2021-12-31']
+        c = c.loc['2006-01-01': '2021-12-31']
 
         if annual and national:
             series = _from_series(ts, 'CA')
@@ -228,7 +228,7 @@ def normalized_price_data(nominal, ppi, deflated):
     code_table = {v: k for k, v in ppi_to_cdl_crop().items()}
 
     df = pd.read_csv(ppi, index_col='DATE', infer_datetime_format=True, parse_dates=True)
-    df = df.loc['2007-01-01': '2021-12-31']
+    df = df.loc['2006-01-01': '2021-12-31']
     scale = df.loc['2021-12-01'] / 100
     df = df / scale
     df.columns = [code_table[k] if k in code_table.keys() else k for k in df.columns]
@@ -251,7 +251,7 @@ def normalized_price_data(nominal, ppi, deflated):
 
         o_file = os.path.join(deflated, '{}.csv'.format(crop))
         print(o_file)
-        c = c.loc['2008-01-01':]
+        c = c.loc['2006-01-01':]
         c.to_csv(o_file)
 
 
@@ -262,15 +262,15 @@ if __name__ == '__main__':
 
     key_ = '/home/dgketchum/quickstats_token.json'
     nass_price_monthly = '/media/research/IrrigationGIS/expansion/analysis/nass_price_monthly.json'
-    # get_monthly_price_timeseries(key_, nass_price_monthly)
+    get_monthly_price_timeseries(key_, nass_price_monthly)
 
     price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data'
     map_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data/values.csv'
     nass_price_annual = '/media/research/IrrigationGIS/expansion/analysis/nass_price_annual.json'
-    # get_annual_price_timeseries(price_data, map_, nass_price_annual, key_)
+    get_annual_price_timeseries(price_data, map_, nass_price_annual, key_)
 
     nominal_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/nominal'
-    # nominal_price_data(nass_price_monthly, nass_price_annual, nominal_)
+    nominal_price_data(nass_price_monthly, nass_price_annual, nominal_)
 
     ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi/ppi_cdl_monthly.csv'
     deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'
