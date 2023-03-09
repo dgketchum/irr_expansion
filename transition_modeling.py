@@ -1,17 +1,24 @@
 import os
 import json
 import random
+import pickle
+import tempfile
 from itertools import combinations
 
 import numpy as np
 import pandas as pd
 import pymc as pm
+import pymc.sampling_jax
 import aesara
 import aesara.tensor as tt
+import arviz as az
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 from utils.cdl import cdl_key
+
+DEFAULTS = {'draws': 1000,
+            'tune': 1000}
 
 
 def _open_js(file_):
@@ -20,7 +27,7 @@ def _open_js(file_):
     return dct
 
 
-def dirichlet_regression(climate, from_price, to_price, from_crop=24):
+def dirichlet_regression(climate, from_price, to_price, from_crop=24, save_model=None):
     climate = _open_js(climate)
     to_price = _open_js(to_price)
     from_price = _open_js(from_price)
@@ -38,27 +45,38 @@ def dirichlet_regression(climate, from_price, to_price, from_crop=24):
 
     combo = list(zip(c_data, fp_data, tp_data, labels))
     random.shuffle(combo)
-    c_data[:], fp_data[:], tp_data[:], labels[:] = zip(*combo[:100])
+    c_data[:], fp_data[:], tp_data[:], labels[:] = zip(*combo[:1000])
 
     s = pd.Series(labels)
     obs = pd.get_dummies(s).values
     n, k = obs.shape
 
-    c = aesara.shared(np.array(c_data))
+    climate = aesara.shared(np.array(c_data))
 
     with pm.Model() as dmr_model:
         a = pm.Normal('a', mu=0, sigma=1, shape=k)
         b = pm.Normal('b', mu=0, sigma=1, shape=k)
 
-        alpha = pm.Deterministic('alpha', pm.math.exp(a + tt.outer(c, b)))
+        alpha = pm.Deterministic('alpha', pm.math.exp(a + tt.outer(climate, b)))
 
         p = pm.Dirichlet('p', a=alpha, shape=(n, k))
 
         F = pm.Multinomial('F', 1, p, observed=obs)
 
-        trace = pm.sample(5000, tune=10000, target_accept=0.9)
+        trace = pm.sampling_jax.sample_numpyro_nuts(**DEFAULTS)
 
-    # pm.model_to_graphviz(dmr_model).view()
+        if save_model:
+            with open(save_model, 'wb') as buff:
+                pickle.dump({'trace': trace}, buff)
+                print('saving', save_model)
+
+
+def summarize_dirichlet_model(saved_model):
+    with open(saved_model, 'rb') as buff:
+        mdata = pickle.load(buff)
+        trace = mdata['trace']
+    summary = az.summary(trace, hdi_prob=0.95, var_names=['alpha'])
+    pass
 
 
 def crop_transitions(cdl_npy, price_files, out_matrix):
@@ -134,6 +152,9 @@ if __name__ == '__main__':
     fp = os.path.join(transitions_, 'fprice.json')
     tp = os.path.join(transitions_, 'tprice.json')
     c = os.path.join(transitions_, 'spei.json')
-    dirichlet_regression(c, fp, tp)
+    target = 24
+    model_dst = os.path.join(transitions_, 'model_{}.pkl'.format(target))
+    dirichlet_regression(c, fp, tp, from_crop=target, save_model=model_dst)
 
+    # summarize_dirichlet_model(model_dst)
 # ========================= EOF ====================================================================
