@@ -10,7 +10,9 @@ from sklearn.linear_model import LogisticRegression
 from transition_data import load_data
 
 DEFAULTS = {'draws': 1000,
-            'tune': 1000}
+            'tune': 1000,
+            'chains': 4,
+            'cores': 1}
 
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
 
@@ -33,9 +35,9 @@ def logistic_regression(climate, from_price, to_price, from_crop=24, samples=100
 
 def dirichlet_regression(y, x, from_crop, save_model=None):
     with pm.Model() as dmr_model:
-        beta_0 = pm.Normal('beta_0', mu=1, sigma=3)
-        beta_1 = pm.Normal('beta_1', mu=1, sigma=3)
-        beta_2 = pm.Normal('beta_2', mu=1, sigma=3)
+        beta_0 = pm.Normal('climate', mu=1, sigma=3)
+        beta_1 = pm.Normal('from_crop', mu=1, sigma=3)
+        beta_2 = pm.Normal('to_crop', mu=1, sigma=3)
 
         alpha = pm.Normal('alpha', mu=1, sigma=3)
 
@@ -46,12 +48,13 @@ def dirichlet_regression(y, x, from_crop, save_model=None):
         obs = pm.DirichletMultinomial('obs', n=y, a=p, shape=y.shape[0])
 
         trace = pm.sample(**DEFAULTS)
+        # trace = pm.sampling_jax.sample_numpyro_nuts(**DEFAULTS)
 
-        if save_model:
-            model_file = save_model.format(from_crop)
-            with open(model_file, 'wb') as buff:
-                pickle.dump({'trace': trace}, buff)
-                print('saving', model_file)
+        model_file = save_model.format(from_crop)
+
+        az.to_netcdf(trace, model_file)
+
+        print(model_file)
 
 
 def run_dirichlet(climate, from_price, to_price, save_model=None):
@@ -85,5 +88,5 @@ if __name__ == '__main__':
     model_dst = os.path.join(transitions_, 'model_sft_{}.pkl')
     run_dirichlet(c, fp, tp, save_model=model_dst)
 
-    # summarize_pymc_model(model_dst)
+    # summarize_pymc_model(model_dst, crop=24)
 # ========================= EOF ====================================================================

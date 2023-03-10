@@ -1,18 +1,13 @@
 import json
 import os
-import pickle
 import random
 from itertools import combinations
-from dateutil.relativedelta import relativedelta as reldt
 
-import arviz as az
 import numpy as np
 import pandas as pd
-import pymc as pm
-import pymc.sampling_jax
-from sklearn.linear_model import LogisticRegression
+from dateutil.relativedelta import relativedelta as reldt
 
-from utils.cdl import cdl_key
+# from utils.cdl import cdl_key
 
 DEFAULTS = {'draws': 1000,
             'tune': 1000}
@@ -127,6 +122,8 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
 
 if __name__ == '__main__':
+
+
     met_cdl = '/media/nvm/field_pts/fields_data/partitioned_npy/cdl/met4_ag3_fr8.npy'
     transitions_ = '/media/research/IrrigationGIS/expansion/analysis/transition'
     files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'

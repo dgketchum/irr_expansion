@@ -29,7 +29,7 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
     for fc in KEYS:
         print('\nTransition from Crop: {}\n\n'.format(fc))
         c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
-                                                           from_crop=fc, n_samples=300)
+                                                           from_crop=fc)
 
         s = pd.Series(labels)
         y = pd.get_dummies(s).values
@@ -41,7 +41,7 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
         pool = mp.Pool(processes=max_concurrent_models)
 
         for i in range(len(data_chunks)):
-            model_name = f'model_{i}.trace'
+            model_name = f'model_{fc}_{i}.trace'
             model_path = os.path.join(model_dir, model_name)
             model_paths.append(model_path)
             r = pool.apply_async(dirichlet_regression, args=(data_chunks[i][1],
@@ -53,6 +53,11 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
         pool.join()
         [r.get() for r in model_result]
 
+
+def concatenate_models(model_dir):
+    model_paths = []
+    for fc in KEYS:
+        print('\nTransition from Crop: {}\n\n'.format(fc))
         combined_model = pm.Model(name=f'combined_model_{fc}')
         combined_trace = None
         with combined_model:
@@ -63,7 +68,7 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
                 else:
                     combined_trace = pm.backends.base.concat_traces([combined_trace, trace])
 
-        for i in range(len(data_chunks)):
+        for i in range(len(model_paths)):
             model_name = f'model_{i}.trace'
             model_path = os.path.join(model_dir, model_name)
             os.remove(model_path)
@@ -73,13 +78,18 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
 
 
 if __name__ == '__main__':
-    transitions_ = '/media/research/IrrigationGIS/expansion/analysis/transition'
+
+    root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
+    if not os.path.exists(root):
+        root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
+
+    transitions_ = os.path.join(root, 'analysis/transition')
     model_dir_ = os.path.join(transitions_, 'models')
 
     fp = os.path.join(transitions_, 'fprice.json')
     tp = os.path.join(transitions_, 'tprice.json')
     c = os.path.join(transitions_, 'spei.json')
 
-    multiproc_pymc_model(c, fp, tp, 2, model_dir_, 100)
+    multiproc_pymc_model(c, fp, tp, 25, model_dir_, 5000)
 
 # ========================= EOF ====================================================================
