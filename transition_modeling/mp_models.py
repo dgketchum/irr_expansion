@@ -5,7 +5,7 @@ import numpy as np
 import pymc as pm
 import pandas as pd
 
-from transition_modeling import dirichlet_regression, load_data
+from transition_modeling.transition_modeling import dirichlet_regression, load_data
 
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
 
@@ -60,7 +60,6 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, s
                 else:
                     combined_trace = pm.backends.base.concat_traces([combined_trace, trace])
 
-        # Clean up temporary files
         for i in range(len(data_chunks)):
             model_name = f'model{i}'
             os.remove(model_name + ".trace")
