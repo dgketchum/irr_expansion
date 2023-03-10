@@ -21,13 +21,14 @@ DEFAULTS = {'draws': 1000,
 
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
 
+
 def _open_js(file_):
     with open(file_, 'r') as fp:
         dct = json.load(fp)
     return dct
 
 
-def load_data(climate, to_price, from_price, from_crop, n_samples=100):
+def load_data(climate, to_price, from_price, from_crop, n_samples=None):
     climate = _open_js(climate)
     to_price = _open_js(to_price)
     from_price = _open_js(from_price)
@@ -59,7 +60,7 @@ def load_data(climate, to_price, from_price, from_crop, n_samples=100):
 def logistic_regression(climate, from_price, to_price, from_crop=24, samples=10000):
     split = int(np.floor(0.7 * samples))
     c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
-                                                 from_crop=from_crop, n_samples=samples)
+                                                       from_crop=from_crop, n_samples=samples)
 
     x, y = np.array([c_data[:split], fp_data[:split], tp_data[:split]]).T, np.array(labels[:split])
     x_test, y_test = np.array([c_data[split:], fp_data[split:], tp_data[split:]]).T, np.array(labels[split:])
@@ -73,12 +74,12 @@ def logistic_regression(climate, from_price, to_price, from_crop=24, samples=100
 
 
 def dirichlet_regression(climate, from_price, to_price, save_model=None):
-
     for fc in KEYS:
-        c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price, from_crop=fc)
+        print('\nTransition from Crop: {}\n\n'.format(fc))
+        c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
+                                                           from_crop=fc, n_samples=1000)
         s = pd.Series(labels)
         obs = pd.get_dummies(s).values
-        # obs = obs.sum(axis=0)
         n, k = obs.shape
 
         climate = aesara.shared(np.array(c_data))
@@ -86,28 +87,31 @@ def dirichlet_regression(climate, from_price, to_price, save_model=None):
         tprice = aesara.shared(np.array(tp_data))
 
         with pm.Model() as dmr_model:
-            a = pm.Normal('a', mu=0, sigma=1, shape=k)
-            b = pm.Normal('b', mu=0, sigma=1, shape=k)
-            b = pm.Normal('c', mu=0, sigma=1, shape=k)
+            i = pm.Normal('i', mu=0, sigma=1, shape=k)
+            fp = pm.Normal('fp', mu=0, sigma=1, shape=k)
+            tp = pm.Normal('tp', mu=0, sigma=1, shape=k)
+            c = pm.Normal('c', mu=0, sigma=1, shape=k)
 
-            alpha = pm.Deterministic('alpha', pm.math.exp(a + tt.outer(tprice, b) + tt.outer(climate, c)))
+            alpha = pm.Deterministic('alpha', pm.math.exp(i + tt.outer(fprice, fp) +
+                                                          tt.outer(tprice, tp) +
+                                                          tt.outer(climate, c)))
 
             p = pm.Dirichlet('p', a=alpha, shape=(n, k))
 
             dm = pm.DirichletMultinomial('dm', 1, p, observed=obs)
 
-            pm.model_to_graphviz(dmr_model).view()
-
             trace = pm.sampling_jax.sample_numpyro_nuts(**DEFAULTS)
 
             if save_model:
-                with open(save_model.format(fc), 'wb') as buff:
+                model_file = save_model.format(fc)
+                with open(model_file, 'wb') as buff:
                     pickle.dump({'trace': trace}, buff)
                     print('saving', save_model)
 
 
-def summarize_pymc_model(saved_model):
-    with open(saved_model, 'rb') as buff:
+def summarize_pymc_model(saved_model, crop=1):
+    model_file = saved_model.format(crop)
+    with open(model_file, 'rb') as buff:
         mdata = pickle.load(buff)
         trace = mdata['trace']
     summary = az.summary(trace, hdi_prob=0.95, var_names=['alpha'])
@@ -186,20 +190,19 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
 
 if __name__ == '__main__':
-
     met_cdl = '/media/nvm/field_pts/fields_data/partitioned_npy/cdl/met4_ag3_fr8.npy'
     transitions_ = '/media/research/IrrigationGIS/expansion/analysis/transition'
     files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'
     response_timescale_ = '/media/research/IrrigationGIS/expansion/analysis/transition/time_scales.json'
 
-    crop_transitions(met_cdl, files_, response_timescale_, transitions_)
+    # crop_transitions(met_cdl, files_, response_timescale_, transitions_)
 
     fp = os.path.join(transitions_, 'fprice.json')
     tp = os.path.join(transitions_, 'tprice.json')
     c = os.path.join(transitions_, 'spei.json')
-    model_dst = os.path.join(transitions_, 'model_{}.pkl')
-    # dirichlet_regression(c, fp, tp, from_crop=target, save_model=model_dst)
+    model_dst = os.path.join(transitions_, 'model_sft_{}.pkl')
+    # dirichlet_regression(c, fp, tp, save_model=model_dst)
     # logistic_regression(c, fp, tp, from_crop=target)
 
-    # summarize_pymc_model(model_dst)
+    summarize_pymc_model(model_dst)
 # ========================= EOF ====================================================================
