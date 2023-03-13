@@ -28,6 +28,7 @@ def dirichlet_regression(y, x, from_crop, save_model=None, cores=1):
     :param cores:
     :return:
     """
+
     DEFAULTS.update({'cores': cores})
 
     # feature count
@@ -45,7 +46,7 @@ def dirichlet_regression(y, x, from_crop, save_model=None, cores=1):
     prior_shape = (k, n_feat)
 
     with pm.Model() as dmr_model:
-
+        # order: [climate, from_crop_price, to_crop_price]
         coeff = pm.Normal('coeff', mu=0.1, sigma=3, shape=prior_shape)
 
         theta = pm.math.dot(coeff, x.T)
@@ -78,9 +79,7 @@ def run_dirichlet(climate, from_price, to_price, save_model=None, cores=4):
 
 def summarize_pymc_model(saved_model, crop=1):
     model_file = saved_model.format(crop)
-    with open(model_file, 'rb') as buff:
-        mdata = pickle.load(buff)
-        trace = mdata['trace']
+    trace = az.from_netcdf(model_file)
     summary = az.summary(trace, hdi_prob=0.95)
     pass
 
@@ -103,7 +102,7 @@ if __name__ == '__main__':
 
     x_ = np.random.random((100, 3))
     y_ = np.eye(7)[np.random.choice(7, 100)].astype(np.uint8)
-    dirichlet_regression(y_, x_, 21, model_dst, cores=4)
+    # dirichlet_regression(y_, x_, 21, model_dst, cores=4)
 
-    # summarize_pymc_model(model_dst, crop=24)
+    summarize_pymc_model(model_dst, crop=1)
 # ========================= EOF ====================================================================
