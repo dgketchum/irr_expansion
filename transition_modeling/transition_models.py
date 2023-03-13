@@ -5,50 +5,58 @@ import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
-from sklearn.linear_model import LogisticRegression
+import matplotlib.pyplot as plt
 
 from transition_data import load_data
 
 DEFAULTS = {'draws': 1000,
             'tune': 1000,
-            'chains': 4,
-            'cores': 1}
+            'chains': 4}
+
+np.random.seed(1234)
 
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
 
 
-def logistic_regression(climate, from_price, to_price, from_crop=24, samples=10000):
-    split = int(np.floor(0.7 * samples))
-    c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
-                                                       from_crop=from_crop, n_samples=samples)
+def dirichlet_regression(y, x, from_crop, save_model=None, cores=1):
+    """
 
-    x, y = np.array([c_data[:split], fp_data[:split], tp_data[:split]]).T, np.array(labels[:split])
-    x_test, y_test = np.array([c_data[split:], fp_data[split:], tp_data[split:]]).T, np.array(labels[split:])
+    :param y: one-hot encoded class for each observation, shape (n_observations, k classes)
+    :param x: feature data for each observation, shape (n_observations, n_features)
+    :param from_crop: crop for which model is fit
+    :param save_model:
+    :param cores:
+    :return:
+    """
+    DEFAULTS.update({'cores': cores})
 
-    clf = LogisticRegression().fit(x, y)
-    pred = clf.predict(x_test)
-    df = pd.DataFrame(columns=['pred', 'y'], data=np.array([pred, y_test]).T)
-    df = df.loc[df['y'] != 24]
-    df['correct'] = df[df['y'] == df['pred']]
-    pass
+    # feature count
+    n_feat = x.shape[1]
 
+    # class count
+    k = y.shape[1]
 
-def dirichlet_regression(y, x, from_crop, save_model=None):
+    # total counts in each replicate
+    n = y.shape[0]
+
+    # total counts of each class outcome
+    total_counts = y.sum(axis=0)
+
+    prior_shape = (k, n_feat)
+
     with pm.Model() as dmr_model:
-        beta_0 = pm.Normal('climate', mu=1, sigma=3)
-        beta_1 = pm.Normal('from_crop', mu=1, sigma=3)
-        beta_2 = pm.Normal('to_crop', mu=1, sigma=3)
 
-        alpha = pm.Normal('alpha', mu=1, sigma=3)
+        coeff = pm.Normal('coeff', mu=0.1, sigma=3, shape=prior_shape)
 
-        theta = alpha + beta_0 * x[:, 0] + beta_1 * x[:, 1] + beta_2 * x[:, 2]
+        theta = pm.math.dot(coeff, x.T)
 
-        p = pm.Deterministic('p', pm.math.exp(theta))
+        alpha = pm.Deterministic('alpha', pm.math.exp(theta))
 
-        obs = pm.DirichletMultinomial('obs', n=y, a=p, shape=y.shape[0])
+        counts = pm.DirichletMultinomial('counts', n=total_counts, a=alpha, shape=(k, n), observed=y.T)
+
+        pm.model_to_graphviz(dmr_model).view()
 
         trace = pm.sample(**DEFAULTS)
-        # trace = pm.sampling_jax.sample_numpyro_nuts(**DEFAULTS)
 
         model_file = save_model.format(from_crop)
 
@@ -57,15 +65,15 @@ def dirichlet_regression(y, x, from_crop, save_model=None):
         print(model_file)
 
 
-def run_dirichlet(climate, from_price, to_price, save_model=None):
+def run_dirichlet(climate, from_price, to_price, save_model=None, cores=4):
     for fc in KEYS:
         print('\nTransition from Crop: {}\n\n'.format(fc))
-        c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price, from_crop=fc, n_samples=100)
+        c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
+                                                           from_crop=fc, n_samples=100)
         s = pd.Series(labels)
         y = pd.get_dummies(s).values
-        y = y.sum(axis=0)
         x = np.array([c_data, fp_data, tp_data]).T
-        dirichlet_regression(y, x, 24, save_model)
+        dirichlet_regression(y, x, fc, save_model, cores=cores)
 
 
 def summarize_pymc_model(saved_model, crop=1):
@@ -78,7 +86,12 @@ def summarize_pymc_model(saved_model, crop=1):
 
 
 if __name__ == '__main__':
-    transitions_ = '/media/research/IrrigationGIS/expansion/analysis/transition'
+
+    root = '/media/research/IrrigationGIS'
+    if not os.path.exists(root):
+        root = '/home/dgketchum/data/IrrigationGIS'
+
+    transitions_ = os.path.join(root, 'expansion/analysis/transition')
 
     fp = os.path.join(transitions_, 'fprice.json')
     tp = os.path.join(transitions_, 'tprice.json')
@@ -86,7 +99,11 @@ if __name__ == '__main__':
     # logistic_regression(c, fp, tp, from_crop=24)
 
     model_dst = os.path.join(transitions_, 'model_sft_{}.pkl')
-    run_dirichlet(c, fp, tp, save_model=model_dst)
+    # run_dirichlet(c, fp, tp, save_model=model_dst)
+
+    x_ = np.random.random((100, 3))
+    y_ = np.eye(7)[np.random.choice(7, 100)].astype(np.uint8)
+    dirichlet_regression(y_, x_, 21, model_dst, cores=4)
 
     # summarize_pymc_model(model_dst, crop=24)
 # ========================= EOF ====================================================================
