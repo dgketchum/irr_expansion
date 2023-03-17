@@ -7,7 +7,7 @@ import pymc as pm
 import pandas as pd
 import arviz as az
 
-from transition_models import dirichlet_regression
+from transition_models import softmax_regression
 from transition_data import load_data
 
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
@@ -44,9 +44,9 @@ def multiproc_pymc_model(climate, from_price, to_price, max_concurrent_models, m
             model_name = f'model_{fc}_{i}.trace'
             model_path = os.path.join(model_dir, model_name)
             model_paths.append(model_path)
-            r = pool.apply_async(dirichlet_regression, args=(data_chunks[i][1],
-                                                             data_chunks[i][0],
-                                                             fc, model_path))
+            r = pool.apply_async(softmax_regression, args=(data_chunks[i][1],
+                                                           data_chunks[i][0],
+                                                           fc, model_path))
             model_result.append(r)
 
         pool.close()
