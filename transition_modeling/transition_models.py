@@ -5,10 +5,8 @@ import numpy as np
 import pymc as pm
 import pandas as pd
 
-from pymc_bart import BART
-
 DEFAULTS = {'draws': 1000,
-            'tune': 1000,
+            'tune': 2000,
             'chains': 4,
             'progressbar': True}
 
@@ -69,6 +67,8 @@ def softmax_regression(y, x, save_model=None, cores=4):
         os.environ['NUMEXPR_NUM_THREADS'] = '1'
         os.environ['OMP_NUM_THREADS'] = '1'
 
+    DEFAULTS.update({'cores': cores})
+
     x = np.array(x)
     y = np.array(y)
 
@@ -80,59 +80,16 @@ def softmax_regression(y, x, save_model=None, cores=4):
 
     with pm.Model() as sft_model:
         # order: [climate, from_crop_price, to_crop_price]
-        a = pm.Normal('a', mu=0, sigma=1, shape=(k,))
-        coeff = pm.Normal('coeff', mu=0, sigma=1, shape=(n_feat, k))
+        a = pm.Normal('a', mu=0, sigma=0.5, shape=(k - 1,))
+        a_f = pm.math.concatenate([[0], a])
+        coeff = pm.Normal('coeff', mu=0, sigma=0.5, shape=(n_feat, k - 1))
+        coeff_f = pm.math.concatenate([np.zeros((n_feat, 1)), coeff], axis=1)
 
-        theta = a + pm.math.dot(x, coeff)
+        theta = a_f + pm.math.dot(x, coeff_f)
 
         z = pm.math.softmax(theta)
 
         obs = pm.Categorical('obs', p=z, observed=y)
-
-        DEFAULTS.update({'trace': [coeff]})
-        DEFAULTS.update({'cores': cores})
-
-        trace = pm.sample(**DEFAULTS)
-
-        summary = az.summary(trace, hdi_prob=0.95)
-        coeff_rows = [i for i in summary.index if 'coeff' in i]
-        df = summary.loc[coeff_rows]
-
-        if save_model:
-            az.to_netcdf(trace, save_model)
-            print(save_model)
-
-
-def bart_regression(y, x, save_model=None, cores=4):
-    """
-
-    :param y: one-hot encoded class for each observation, shape (n_observations, k classes)
-    :param x: feature data for each observation, shape (n_observations, n_features)
-    :param save_model:
-    :param cores:
-    :return:
-    """
-
-    if cores == 1:
-        os.environ['MKL_NUM_THREADS'] = '1'
-        os.environ['NUMEXPR_NUM_THREADS'] = '1'
-        os.environ['OMP_NUM_THREADS'] = '1'
-
-    x = np.array(x)
-    y = np.array(y)
-
-    # feature count
-    n_feat = x.shape[1]
-
-    # class count
-    k = len(np.unique(y))
-
-    with pm.Model() as bart_g:
-        sigma = pm.HalfNormal("sigma", 1)
-        mu = BART("mu", x[:, 1:], x[:, 0], m=20)
-        obs = pm.Normal("obs", mu, sigma, observed=x[:, 0])
-
-        DEFAULTS.update({'cores': cores})
 
         trace = pm.sample(**DEFAULTS)
 
