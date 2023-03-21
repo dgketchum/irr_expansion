@@ -21,6 +21,32 @@ def _open_js(file_):
     return dct
 
 
+def data_to_json(climate, from_price, to_price, labels_dir, samples, glob):
+    label_file = os.path.join(labels_dir, '{}.json'.format(glob))
+    dct = {}
+    for fc in KEYS:
+        try:
+            print('\nTransition from Crop: {}'.format(fc))
+            c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
+                                                               from_crop=fc, n_samples=samples)
+            s = pd.Series(labels)
+            y = pd.get_dummies(s).values
+            print(s.shape[0], 'observations of', fc)
+
+            x = np.array([c_data, fp_data, tp_data]).T
+
+            dct[fc] = {'keys': keys,
+                       'x': x.tolist(),
+                       'y': y.tolist(),
+                       'counts': list([str(c) for c in y.sum(axis=0)]),
+                       'labels': [t.split('_')[1] for t in keys]}
+        except KeyError:
+            print('KeyError, skipping', fc)
+
+    with open(label_file, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 def load_data(climate, to_price, from_price, from_crop, n_samples=None):
     climate = _open_js(climate)
     to_price = _open_js(to_price)
@@ -122,13 +148,22 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
 
 if __name__ == '__main__':
+    root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
+    if not os.path.exists(root):
+        root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
 
+    transitions_ = os.path.join(root, 'analysis/transition')
+    model_dir_ = os.path.join(transitions_, 'models')
 
-    met_cdl = '/media/nvm/field_pts/fields_data/partitioned_npy/cdl/met4_ag3_fr8.npy'
-    transitions_ = '/media/research/IrrigationGIS/expansion/analysis/transition'
-    files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'
-    response_timescale_ = '/media/research/IrrigationGIS/expansion/analysis/transition/time_scales.json'
+    from_price_ = os.path.join(transitions_, 'fprice.json')
+    to_price_ = os.path.join(transitions_, 'tprice.json')
+    climate_ = os.path.join(transitions_, 'spei.json')
+    glob = 'model_sft'
 
-    # crop_transitions(met_cdl, files_, response_timescale_, transitions_)
+    model_dir = os.path.join(transitions_, 'models')
+    sample_data = os.path.join(transitions_, 'sample_data')
+
+    samples_ = 1000
+    data_to_json(climate_, from_price_, to_price_, sample_data, samples=samples_, glob='sample_{}'.format(samples_))
 
 # ========================= EOF ====================================================================
