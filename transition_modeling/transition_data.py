@@ -30,16 +30,18 @@ def data_to_json(climate, from_price, to_price, labels_dir, samples, glob):
             c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
                                                                from_crop=fc, n_samples=samples)
             s = pd.Series(labels)
-            y = pd.get_dummies(s).values
+            one_hot = pd.get_dummies(s).values
+            y = [x.item() for x in np.argmax(one_hot, axis=1)]
+            labels = list(set(s))
             print(s.shape[0], 'observations of', fc)
-
             x = np.array([c_data, fp_data, tp_data]).T
+            x = (x - x.mean(axis=0)) / x.std(axis=0)
 
             dct[fc] = {'keys': keys,
                        'x': x.tolist(),
-                       'y': y.tolist(),
-                       'counts': list([str(c) for c in y.sum(axis=0)]),
-                       'labels': [t.split('_')[1] for t in keys]}
+                       'y': list(y),
+                       'labels': labels,
+                       'counts': list([str(c) for c in one_hot.sum(axis=0)])}
         except KeyError:
             print('KeyError, skipping', fc)
 
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     model_dir = os.path.join(transitions_, 'models')
     sample_data = os.path.join(transitions_, 'sample_data')
 
-    samples_ = 1000
+    samples_ = 10000
     data_to_json(climate_, from_price_, to_price_, sample_data, samples=samples_, glob='sample_{}'.format(samples_))
 
 # ========================= EOF ====================================================================

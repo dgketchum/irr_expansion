@@ -1,16 +1,10 @@
 import json
 import os
 from multiprocessing import Pool
-
-import arviz as az
-import numpy as np
 import pandas as pd
-
-from sklearn.ensemble import RandomForestClassifier
-
-from transition_data import load_data
-from transition_models import softmax_regression, dirichlet_regression
-
+import numpy as np
+import arviz as az
+from transition_models import softmax_regression
 from utils.cdl import cdl_key
 
 
@@ -50,7 +44,7 @@ def run_model(sample_data, model_dir=None, glob=None, cores=4):
 
         model_file = os.path.join(model_dir, '{}_{}.nc'.format(glob, fc))
 
-        dirichlet_regression(d['y'], d['x'], model_file, cores=cores)
+        softmax_regression(d['y'], d['x'], model_file, cores=cores)
 
 
 def save_coefficients(trace, ofile):
@@ -89,24 +83,13 @@ if __name__ == '__main__':
     model_dir = os.path.join(transitions_, 'models', 'debug')
     mglob_ = 'model_sft_{}.nc'
     cglob_ = 'model_sft_{}.csv'
-    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_1000.json')
-    # run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
 
-    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_10000.json')
-    # multiproc_model(sample_data_, multiproc=0, glob=glob_)
+    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_1000.json')
+    run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
+    #
+    # multiproc_model(sample_data_, multiproc=5, glob=glob_)
 
     old_coeffs = os.path.join(transitions_, 'coefficients')
     # summarize_pymc_model(model_dir, model_dir, mglob_, cglob_)
-
-    from sklearn import datasets
-    x, y = datasets.load_iris(return_X_y=True)
-    # softmax_regression(y, x, cores=4)
-
-    irr = '/media/research/IrrigationGIS/irrmapper/EE_extracts/concatenated/state/AZ_22NOV2021.csv'
-    df = pd.read_csv(irr).sample(n=10000)
-    y = df['POINT_TYPE'].values
-    x = df[['nd_mean_gs', 'pet_tot_spr', 'B4_2']]
-    x = np.subtract(x, x.mean(axis=0)).divide(x.std(axis=0))
-    softmax_regression(y, x, cores=4)
 
 # ========================= EOF ====================================================================

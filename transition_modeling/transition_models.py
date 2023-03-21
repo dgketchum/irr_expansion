@@ -4,11 +4,21 @@ import arviz as az
 import numpy as np
 import pymc as pm
 import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
 
 DEFAULTS = {'draws': 1000,
             'tune': 2000,
             'chains': 4,
             'progressbar': True}
+
+
+def random_forest(y, x):
+    counts = y.sum(axis=0)
+    y, y_test, x, x_test = np.argmax(y[:700], axis=1), np.argmax(y[700:], axis=1), x[:700], x[700:]
+    rf = RandomForestClassifier()
+    rf.fit(x, y)
+    pred = rf.predict(x_test)
+    stack = np.stack([y_test, pred]).T
 
 
 def dirichlet_regression(y, x, save_model=None, cores=4):
@@ -93,11 +103,13 @@ def softmax_regression(y, x, save_model=None, cores=4):
 
         trace = pm.sample(**DEFAULTS)
 
-        summary = az.summary(trace, hdi_prob=0.95)
-        coeff_rows = [i for i in summary.index if 'coeff' in i]
-        df = summary.loc[coeff_rows]
-
         if save_model:
+            summary = az.summary(trace, hdi_prob=0.95)
+            coeff_rows = [i for i in summary.index if 'coeff' in i]
+            df = summary.loc[coeff_rows]
+            csv = save_model.replace('.nc', '.csv')
+            df.to_csv(csv)
+
             az.to_netcdf(trace, save_model)
             print(save_model)
 
