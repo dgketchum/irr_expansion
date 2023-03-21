@@ -1,14 +1,14 @@
 import json
 import os
 from multiprocessing import Pool
-import pandas as pd
-import numpy as np
+
 import arviz as az
+
 from transition_models import softmax_regression
 from utils.cdl import cdl_key
 
 
-def multiproc_model(sample_data, multiproc=20, glob=None):
+def multiproc_model(sample_data, model_dst, multiproc=20, glob=None):
     with open(sample_data, 'r') as fp:
         data = json.load(fp)
 
@@ -21,7 +21,7 @@ def multiproc_model(sample_data, multiproc=20, glob=None):
     for fc, d in data.items():
 
         print('starting', fc)
-        model_file = os.path.join(model_dir, '{}_{}.nc'.format(glob, fc))
+        model_file = os.path.join(model_dst, '{}_{}.nc'.format(glob, fc))
 
         if not multiproc:
             softmax_regression(d['y'], d['x'], model_file, cores=cores)
@@ -78,18 +78,19 @@ if __name__ == '__main__':
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
     if not os.path.exists(root):
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
+
     transitions_ = os.path.join(root, 'analysis/transition')
     glob_ = 'model_sft'
-    model_dir = os.path.join(transitions_, 'models', 'debug')
     mglob_ = 'model_sft_{}.nc'
     cglob_ = 'model_sft_{}.csv'
+    model_dir = os.path.join(transitions_, 'models')
 
-    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_1000.json')
-    run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
-    #
-    # multiproc_model(sample_data_, multiproc=5, glob=glob_)
+    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_10000.json')
+    # run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
+
+    # multiproc_model(sample_data_, model_dst=model_dir, multiproc=20, glob=glob_)
 
     old_coeffs = os.path.join(transitions_, 'coefficients')
-    # summarize_pymc_model(model_dir, model_dir, mglob_, cglob_)
+    summarize_pymc_model(model_dir, model_dir, mglob_, cglob_)
 
 # ========================= EOF ====================================================================

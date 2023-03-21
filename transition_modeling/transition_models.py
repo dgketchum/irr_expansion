@@ -3,63 +3,11 @@ import os
 import arviz as az
 import numpy as np
 import pymc as pm
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 
 DEFAULTS = {'draws': 1000,
             'tune': 2000,
             'chains': 4,
             'progressbar': True}
-
-
-def random_forest(y, x):
-    counts = y.sum(axis=0)
-    y, y_test, x, x_test = np.argmax(y[:700], axis=1), np.argmax(y[700:], axis=1), x[:700], x[700:]
-    rf = RandomForestClassifier()
-    rf.fit(x, y)
-    pred = rf.predict(x_test)
-    stack = np.stack([y_test, pred]).T
-
-
-def dirichlet_regression(y, x, save_model=None, cores=4):
-    if cores == 1:
-        os.environ['MKL_NUM_THREADS'] = '1'
-        os.environ['NUMEXPR_NUM_THREADS'] = '1'
-        os.environ['OMP_NUM_THREADS'] = '1'
-
-    x = np.array(x)
-    y = np.array(y)
-
-    # feature count
-    n_feat = x.shape[1]
-    n = x.shape[0]
-    # y = pd.get_dummies(y).values
-
-    # class count
-    k = y.shape[1]
-
-    coeff = pm.Normal.dist(mu=0, sigma=3, shape=(n_feat, k)).eval()
-    theta = pm.math.dot(x, coeff).eval()
-    alpha = pm.math.exp(theta).eval()
-    counts = pm.DirichletMultinomial.dist(n=1, a=alpha, shape=(n, k)).eval()
-
-    with pm.Model() as dmr_model:
-        coeff = pm.Normal('coeff', mu=0, sigma=3, shape=(n_feat, k))
-
-        theta = pm.math.dot(x, coeff)
-
-        alpha = pm.math.exp(theta)
-
-        obs = pm.DirichletMultinomial('obs', n=1, a=alpha, shape=(n, k), observed=y)
-
-        DEFAULTS.update({'trace': [coeff]})
-        DEFAULTS.update({'cores': cores})
-
-        trace = pm.sample(**DEFAULTS)
-
-        if save_model:
-            az.to_netcdf(trace, save_model)
-            print(save_model)
 
 
 def softmax_regression(y, x, save_model=None, cores=4):
@@ -109,7 +57,6 @@ def softmax_regression(y, x, save_model=None, cores=4):
             df = summary.loc[coeff_rows]
             csv = save_model.replace('.nc', '.csv')
             df.to_csv(csv)
-
             az.to_netcdf(trace, save_model)
             print(save_model)
 
