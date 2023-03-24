@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 
 import ee
 
+from utils.cdl import remap_cdl
+
 
 def get_world_climate(months, param='prec'):
     if months[0] > months[1]:
@@ -141,6 +143,46 @@ def landsat_composites(year, start, end, roi, append_name, composites_only=False
         bands = bands_means.addBands([ndvi, ndwi, evi, gi])
 
     return bands
+
+
+def get_cdl(yr):
+    cultivated, crop = None, None
+    cdl_years = [x for x in range(2008, 2021)]
+    cultivated_years = [x for x in range(2013, 2019)]
+
+    mode_reduce = ee.Reducer.mode()
+
+    first = True
+    for y in cultivated_years:
+        image = ee.Image('USDA/NASS/CDL/{}'.format(y))
+        cultivated = image.select('cultivated')
+        cultivated = cultivated.remap([1, 2], [0, 1])
+        if first:
+            cultivated = cultivated.rename('clt_{}'.format(y))
+            first = False
+        else:
+            cultivated.addBands(cultivated.rename('clt_{}'.format(y)))
+
+    cultivated = cultivated.reduce(mode_reduce).resample('bilinear').rename('cdl')
+
+    if yr in cdl_years:
+        image = ee.Image('USDA/NASS/CDL/{}'.format(yr))
+        crop = image.select('cropland')
+    else:
+        first = True
+        for y in cdl_years:
+            image = ee.Image('USDA/NASS/CDL/{}'.format(y))
+            crop = image.select('cropland')
+            if first:
+                crop = crop.rename('crop_{}'.format(y))
+                first = False
+            else:
+                crop.addBands(crop.rename('crop_{}'.format(y)))
+        crop = crop.reduce(mode_reduce).rename('cropland')
+
+    cdl_keys, our_keys = remap_cdl()
+    simple_crop = crop.remap(cdl_keys, our_keys).rename('crop5c').resample('bilinear')
+    return cultivated, crop, simple_crop
 
 
 if __name__ == '__main__':
