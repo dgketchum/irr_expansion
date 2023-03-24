@@ -32,14 +32,16 @@ def data_to_json(climate, from_price, to_price, labels_dir, samples, glob):
             s = pd.Series(labels)
             one_hot = pd.get_dummies(s).values
             y = [x.item() for x in np.argmax(one_hot, axis=1)]
-            labels = list(set(s))
+            labels = [str(l) for l in list(set(s))]
             print(s.shape[0], 'observations of', fc)
+
+            feature_order = ['climate', 'from_price', 'to_price']
             x = np.array([c_data, fp_data, tp_data]).T
             x = (x - x.mean(axis=0)) / x.std(axis=0)
 
-            dct[fc] = {'keys': keys,
-                       'x': x.tolist(),
+            dct[fc] = {'x': x.tolist(),
                        'y': list(y),
+                       'features': feature_order,
                        'labels': labels,
                        'counts': list([str(c) for c in one_hot.sum(axis=0)])}
         except KeyError:
@@ -151,8 +153,10 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
 if __name__ == '__main__':
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
+    samples_ = 1000
     if not os.path.exists(root):
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
+        samples_ = 10000
 
     transitions_ = os.path.join(root, 'analysis/transition')
     model_dir_ = os.path.join(transitions_, 'models')
@@ -165,7 +169,11 @@ if __name__ == '__main__':
     model_dir = os.path.join(transitions_, 'models')
     sample_data = os.path.join(transitions_, 'sample_data')
 
-    samples_ = 10000
-    data_to_json(climate_, from_price_, to_price_, sample_data, samples=samples_, glob='sample_{}'.format(samples_))
+    if samples_:
+        glb = 'sample_{}'.format(samples_)
+    else:
+        glb = 'sample'.format(samples_)
+
+    data_to_json(climate_, from_price_, to_price_, sample_data, samples=samples_, glob=glb)
 
 # ========================= EOF ====================================================================

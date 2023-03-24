@@ -1,16 +1,11 @@
 import os
 
 import arviz as az
-import numpy as np
 import pymc as pm
-
-DEFAULTS = {'draws': 1000,
-            'tune': 2000,
-            'chains': 4,
-            'progressbar': True}
+import pymc.sampling_jax
 
 
-def softmax_regression(y, x, save_model=None, cores=4):
+def softmax_regression(coords, save_model=None, cores=4):
     """
 
     :param y: one-hot encoded class for each observation, shape (n_observations, k classes)
@@ -25,38 +20,23 @@ def softmax_regression(y, x, save_model=None, cores=4):
         os.environ['NUMEXPR_NUM_THREADS'] = '1'
         os.environ['OMP_NUM_THREADS'] = '1'
 
-    DEFAULTS.update({'cores': cores})
+    x = coords.pop('x')
+    y = coords.pop('y')
 
-    x = np.array(x)
-    y = np.array(y)
-
-    # feature count
-    n_feat = x.shape[1]
-
-    # class count
-    k = len(np.unique(y))
-
-    with pm.Model() as sft_model:
+    with pm.Model(coords=coords) as sft_model:
         # order: [climate, from_crop_price, to_crop_price]
-        a = pm.Normal('a', mu=0, sigma=0.5, shape=(k - 1,))
-        a_f = pm.math.concatenate([[0], a])
-        coeff = pm.Normal('coeff', mu=0, sigma=0.5, shape=(n_feat, k - 1))
-        coeff_f = pm.math.concatenate([np.zeros((n_feat, 1)), coeff], axis=1)
+        a = pm.Normal('a', mu=0, sigma=0.5, dims='labels')
+        coeff = pm.Normal('b', mu=0, sigma=0.5, dims=('features', 'labels'))
 
-        theta = a_f + pm.math.dot(x, coeff_f)
+        theta = a + pm.math.dot(x, coeff)
 
         z = pm.math.softmax(theta)
 
         obs = pm.Categorical('obs', p=z, observed=y)
 
-        trace = pm.sample(**DEFAULTS)
+        trace = pm.sampling_jax.sample_numpyro_nuts()
 
         if save_model:
-            summary = az.summary(trace, hdi_prob=0.95)
-            coeff_rows = [i for i in summary.index if 'coeff' in i]
-            df = summary.loc[coeff_rows]
-            csv = save_model.replace('.nc', '.csv')
-            df.to_csv(csv)
             az.to_netcdf(trace, save_model)
             print(save_model)
 
