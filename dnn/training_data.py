@@ -5,8 +5,7 @@ from calendar import monthrange
 
 import ee
 
-from utils.cdl import get_cdl
-from utils.ee_utils import get_world_climate
+from utils.ee_utils import get_world_climate, get_cdl
 
 sys.path.insert(0, os.path.abspath('../..'))
 
@@ -121,6 +120,7 @@ def stack_bands(yr, roi, resolution, **scale_factors):
                        (late_spring_s, late_spring_e, 'lspr', (5, 7)),
                        (summer_s, summer_e, 'sum', (7, 9)),
                        (winter_s, winter_e, 'win', (1, 3))]:
+
         gridmet = ee.ImageCollection("IDAHO_EPSCOR/GRIDMET").filterBounds(
             roi).filterDate(s, e).select('pr', 'etr', 'tmmn', 'tmmx')
 

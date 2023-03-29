@@ -17,7 +17,7 @@ from keras.callbacks import ReduceLROnPlateau, EarlyStopping
 import tensorflow as tf
 from tensorflow.python.tools import saved_model_utils
 
-from call_ee import stack_bands, PROPS
+from training_data import stack_bands, PROPS
 
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 os.environ['CUDA_VISIBLE_DEVICES'] = '/gpu:0'
@@ -140,8 +140,9 @@ class DNN:
             example.ParseFromString(raw_record.numpy())
             print(example)
 
-    def train(self, batch, data_dir, save_test_data=None):
+    def train(self, batch, data_dir, save_test_data=None, epochs=1000, verbose=0):
 
+        print('\n\nTraining {}'.format(self.label))
         training_data = [os.path.join(data_dir, p) for p in os.listdir(data_dir)]
         dataset = tf.data.TFRecordDataset(training_data, compression_type='GZIP')
 
@@ -162,10 +163,13 @@ class DNN:
         self.prepare(len(self.feature_names))
 
         reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.8, patience=3, min_lr=0.00001, cooldown=3)
+
         early_stopping = EarlyStopping(monitor='val_loss', patience=15, mode='auto',
                                        restore_best_weights=True, min_delta=0.00001)
-        self.model.fit(x=input_dataset, verbose=1, epochs=1000, validation_data=input_test,
+
+        self.model.fit(x=input_dataset, verbose=verbose, epochs=epochs, validation_data=input_test,
                        validation_freq=1, callbacks=[reduce_lr, early_stopping])
+
         self.model.get_config()
 
         y_pred = self.model.predict(x=input_test)[:, 0, 0, :]
@@ -174,18 +178,18 @@ class DNN:
 
         if save_test_data:
             df = pd.DataFrame(columns=['y_test', 'y_pred'], data=np.array([y_test, y_pred])[:, :, 0].T)
-            df[self.feature_names] = x_test
+            # df[self.feature_names] = x_test
             df.to_csv(save_test_data, float_format='%.4f')
 
         rmse = mean_squared_error(y_test, y_pred, squared=False)
         print('target {}'.format(self.target))
-        print('observed ET: {:.3f} mm'.format(y_test.mean()))
-        print('predicted ET mean: {:.3f} mm'.format(y_pred.mean()))
-        print('predicted ET min: {:.3f} mm'.format(y_pred.min()))
-        print('predicted ET max: {:.3f} mm'.format(y_pred.max()))
-        print('predicted ET std: {:.3f} mm'.format(y_pred.std()))
+        print('observed ET: {:.3f} m'.format(y_test.mean()))
+        print('predicted ET mean: {:.3f} m'.format(y_pred.mean()))
+        print('predicted ET min: {:.3f} m'.format(y_pred.min()))
+        print('predicted ET max: {:.3f} m'.format(y_pred.max()))
+        print('predicted ET std: {:.3f} m'.format(y_pred.std()))
 
-        print('rmse ET: {:.3f} mm'.format(rmse))
+        print('rmse ET: {:.3f} m'.format(rmse))
         print('rmse {:.3f} %'.format(rmse / np.array(y_test).mean() * 100.))
         print('trained on {}\n'.format(self.feature_names))
 
@@ -406,7 +410,8 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/ept'
 
     tf.keras.utils.set_random_seed(1234)
-    models = '/media/nvm/ept/ept_model_zoran_3FEB2023'
+    models = os.path.join(root, 'ept_model_zoran_28MAR2023')
+    validation_csv = os.path.join(root, 'ept_validation_csv')
 
     data = os.path.join(root, 'tfr')
     VERSION_NAME = 'v00'
@@ -416,12 +421,13 @@ if __name__ == '__main__':
         model_dir = os.path.join(models, t)
         nn = DNN(month=m, label=t, _dir=model_dir)
         nn.model_name = MODEL_NAME.format(m)
-        # nn.train(2560, data)
+        validation_data = os.path.join(validation_csv, 'ept_validation_{}_28MAR2023.csv'.format(m))
+        nn.train(2560, data, save_test_data=validation_data, epochs=2, verbose=0)
         # nn.save()
-        nn.load()
-        nn.infer_local(os.path.join(root, 'full_stack'),
-                       os.path.join(root, 'full_stack_pred'),
-                       calc_diff=False,
-                       overwrite=True)
+        # nn.load()
+        # nn.infer_local(os.path.join(root, 'full_stack'),
+        #                os.path.join(root, 'full_stack_pred'),
+        #                calc_diff=False,
+        #                overwrite=True)
 
 # ========================= EOF ====================================================================
