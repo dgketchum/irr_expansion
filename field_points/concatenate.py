@@ -9,7 +9,8 @@ from gridded_data import BASIN_STATES
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 
 
-def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None, itype_dir=None, cdl_dir=None):
+def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None,
+                           itype_dir=None, cdl_dir=None):
     tile_file = 'field_points/tiles.json'
     if not os.path.exists(tile_file):
         tile_file = 'tiles.json'
@@ -115,6 +116,53 @@ def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None, 
         print(out_path)
 
 
+def mean_et(csv_dir, glb=''):
+    adf = pd.DataFrame(columns=['et', 'eff_ppt', 'cc'])
+    for s in BASIN_STATES[1:]:
+        cc_cols_yr = ['cc_{}'.format(m) for m in range(1987, 2022)]
+        ept_cols_yr = ['eff_ppt_{}'.format(m) for m in range(1987, 2022)]
+        et_cols_yr = ['et_{}'.format(m) for m in range(1987, 2022)]
+
+        sdf = pd.DataFrame()
+        for yr in range(1987, 2022):
+            print(s, yr)
+            first = True
+            cc_cols = ['cc_{}'.format(m) for m in range(4, 11)]
+            ept_cols = ['eff_ppt_{}'.format(m) for m in range(4, 11)]
+            et_cols = ['et_{}'.format(m) for m in range(4, 11)]
+            df = pd.DataFrame()
+            for m in range(4, 11):
+                _file = os.path.join(csv_dir, '{}_{}_{}_{}.csv'.format(glb, s, yr, m))
+                c = pd.read_csv(_file, index_col='OPENET_ID')
+                if first:
+                    df['cc_{}'.format(m)] = c['cc']
+                    df['eff_ppt_{}'.format(m)] = c['eff_ppt']
+                    df['et_{}'.format(m)] = c['et']
+                    first = False
+                else:
+                    match = [i for i in c.index if i in df.index]
+                    df.loc[match, 'cc_{}'.format(m)] = c.loc[match, 'cc']
+                    df.loc[match, 'eff_ppt_{}'.format(m)] = c.loc[match, 'eff_ppt']
+                    df.loc[match, 'et_{}'.format(m)] = c.loc[match, 'et']
+
+            df['cc'] = df[cc_cols].sum(axis=1)
+            df['eff_ppt'] = df[ept_cols].sum(axis=1)
+            df['et'] = df[et_cols].sum(axis=1)
+
+            sdf['cc_{}'.format(yr)] = df['cc']
+            sdf['eff_ppt_{}'.format(yr)] = df['eff_ppt']
+            sdf['et_{}'.format(yr)] = df['et']
+
+        sdf['cc'] = sdf[cc_cols_yr].mean(axis=1)
+        sdf['eff_ppt'] = sdf[ept_cols_yr].mean(axis=1)
+        sdf['et'] = sdf[et_cols_yr].mean(axis=1)
+        sdf = sdf[['cc', 'eff_ppt', 'et']]
+        adf = pd.concat([adf, sdf], axis=0)
+
+    mean_ = adf.mean(axis=0)
+    print(mean_)
+
+
 if __name__ == '__main__':
     root = '/media/nvm'
     if not os.path.exists(root):
@@ -131,6 +179,9 @@ if __name__ == '__main__':
     #                        file_check=False, itype_dir=itype_data)
 
     fpd = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
-    concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
-                           file_check=False, cdl_dir=cdl_data)
+    # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
+    #                        file_check=False, cdl_dir=cdl_data)
+
+    et_csv_ = os.path.join(root, 'field_pts/csv/et')
+    mean_et(et_csv_, glb='ietr_fields_13FEB2023')
 # ========================= EOF ====================================================================

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from gridded_data import BASIN_STATES
-from utils.cdl import cdl_key
+from field_points.crop_codes import cdl_key
 
 
 def get_openet_cdl(in_dir, join_csv, out_dir):
