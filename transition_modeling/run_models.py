@@ -4,9 +4,10 @@ from multiprocessing import Pool
 
 import numpy as np
 import arviz as az
+import pandas as pd
 
-from transition_models import softmax_regression
 from field_points.crop_codes import cdl_key
+from transition_models import softmax_regression
 
 
 def multiproc_model(sample_data, model_dst, multiproc=20, glob=None):
@@ -43,13 +44,15 @@ def run_model(sample_data, model_dir=None, glob=None, cores=4):
         data = json.load(fp)
 
     for fc, d in data.items():
-        print('\n\nmodeling {}: {}'.format(fc, cdl[int(fc)][0]))
-
         model_file = os.path.join(model_dir, '{}_{}.nc'.format(glob, fc))
+
+        # if os.path.exists(model_file):
+        #     continue
 
         d['x'] = np.array(d['x'])
         d['y'] = np.array(d['y'])
 
+        print('\n\nmodeling {}: {}     {} samples'.format(fc, cdl[int(fc)][0], d['x'].shape[0]))
         softmax_regression(d, model_file, cores=cores)
 
 
@@ -69,10 +72,31 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
         ofile = os.path.join(coeff_summary, 'model_sft_{}.csv'.format(crop))
 
         trace = az.from_netcdf(model_file)
-        summary = az.summary(trace, hdi_prob=0.95)
+        df = az.summary(trace, hdi_prob=0.95)
+        reind, counts, labels, coeff, crop_name = [], [], [], [], []
+        for ct, label in zip(d['counts'], d['labels']):
+            reind.append('a[{}]'.format(label))
+            coeff.append('a')
+            reind.append('b[climate, {}]'.format(label))
+            coeff.append('climate')
+            reind.append('b[from_price, {}]'.format(label))
+            coeff.append('from_price')
+            reind.append('b[to_price, {}]'.format(label))
+            coeff.append('to_price')
+            counts.append(int(ct))
+            labels.append(label)
+            crop_str = cdl[int(label)][0]
+            crop_name.append(crop_str)
 
-        df['count'] = np.array([int(x) for x in d['counts']]).repeat(3)
-        df = df[['mean', 'sd', 'count', 'hdi_2.5%', 'hdi_97.5%', 'r_hat']]
+        counts = np.array(counts).repeat(4)
+        crop_name = np.array(crop_name).repeat(4)
+        labels = np.array(labels).repeat(4)
+        df = df.reindex(reind)
+        df['coeff'] = coeff
+        df['counts'] = counts
+        df['label'] = labels
+        df['crop'] = crop_name
+        df = df[['label', 'coeff', 'mean', 'sd', 'counts', 'hdi_2.5%', 'hdi_97.5%', 'crop']]
         df.to_csv(ofile)
         print(ofile)
 
@@ -80,22 +104,56 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
 if __name__ == '__main__':
 
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
-    sample = 1000
+    sample = 10000
     if not os.path.exists(root):
+        sample = None
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
-        sample = 10000
+
+    transitions_ = os.path.join(root, 'analysis/transition')
 
     glob_ = 'model_sft'
     mglob_ = 'model_sft_{}.nc'
     cglob_ = 'model_sft_{}.csv'
 
-    transitions_ = os.path.join(root, 'analysis/transition')
-    sample_data_ = os.path.join(transitions_, 'sample_data', 'sample_{}.json'.format(sample))
+    from_price_ = os.path.join(transitions_, 'fprice.json')
+    to_price_ = os.path.join(transitions_, 'tprice.json')
+    climate_ = os.path.join(transitions_, 'spei.json')
+    glob = 'model_sft'
+
     model_dir = os.path.join(transitions_, 'models')
+    sample_data = os.path.join(transitions_, 'sample_data')
 
-    run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
+    if sample:
+        glb = 'sample_{}'.format(sample)
+    else:
+        glb = 'sample'.format(sample)
+
+    model_dir = os.path.join(transitions_, 'models')
+    summaries = os.path.join(transitions_, 'summaries')
+    sample_data_ = os.path.join(transitions_, 'sample_data', '{}.json'.format(glb))
+
+    # data_to_json(climate_, from_price_, to_price_, sample_data, samples=sample, glob=glb)
+    # run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
     # multiproc_model(sample_data_, model_dst=model_dir, multiproc=30, glob=glob_)
+    # summarize_pymc_model(model_dir, summaries, sample_data_)
 
-    # summarize_pymc_model(model_dir, model_dir, sample_data_)
+    irr = '/media/research/IrrigationGIS/irrmapper/EE_extracts/concatenated/state/AZ_22NOV2021.csv'
+    df = pd.read_csv(irr).sample(n=10000)
+    df = df.loc[df['POINT_TYPE'].apply(lambda x: x in [0, 2])]
+    y = df['POINT_TYPE'].values
+    y[y == 0] = 1
+    y[y]
+    labels, counts = np.unique(y, return_counts=True)
+    df['rnd'] = np.random.rand(df.shape[0]) + 10
+    x = df[['nd_mean_gs', 'B10_gs', 'rnd']]
+    x = np.subtract(x, x.mean(axis=0)).divide(x.std(axis=0))
+    d = {'x': x, 'y': y, 'features': ['nd', 'lst', 'rnd'], 'counts': counts, 'labels': labels}
+    model_file_ = 'irr_model.nc'
+    softmax_regression(d, model_file_, cores=4)
+
+    # from sklearn.linear_model import LogisticRegression
+    # lr = LogisticRegression()
+    # lr.fit(x, y)
+    # pass
 
 # ========================= EOF ====================================================================
