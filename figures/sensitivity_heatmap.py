@@ -9,7 +9,7 @@ from matplotlib.patches import Rectangle
 import pandas as pd
 import seaborn as sns
 
-from call_ee import BASIN_STATES
+BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 warnings.filterwarnings(action='once')
 
@@ -43,8 +43,6 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
     for month in range(5, 11):
         use_periods = list(range(1, month - 2))
 
-        title = {'r2': 'Correlation', 'b': 'Slope'}[param]
-
         data = os.path.join(data_dir, '{}_{}.json'.format(desc_str, month))
 
         with open(data, 'r') as f_obj:
@@ -53,7 +51,7 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
         if basins:
             combos = [('SPI', 'SFI'), ('SPEI', 'SFI'), ('SFI', 'SCUI'), ('SFI', 'SIMI')]
         else:
-            combos = [('SPEI', 'SIMI')]
+            combos = [('SPEI', 'SIMI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPI', 'SCUI')]
 
         keys = [list(v.keys()) for k, v in data.items()]
         keys = list(set([item for sublist in keys for item in sublist]))
@@ -85,23 +83,24 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
                     else:
                         grid[i, j] = np.mean(slice_)
 
-            grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid)
-            ax = sns.heatmap(grid, square=True, annot=True, cmap='magma')
+            grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid).values
+
+            ax = sns.heatmap(grid, square=True, annot=True, cmap='magma', cbar=False,
+                             xticklabels=met_periods, yticklabels=use_periods)
+
             y, x = np.unravel_index(np.argmax(np.abs(grid), axis=None), grid.shape)
             ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
             plt.xlabel('{} - Months'.format(met))
             plt.ylabel('{}\nMonths'.format(use))
             plt.yticks(rotation=0)
             ax.tick_params(axis='y', which='major', pad=30)
-            mstr = datetime(1991, month, 1).strftime('%B')
-            plt.title('Mean Study Area Basin {}\n{}'.format(title, mstr))
-            plt.subplots_adjust(left=0.5)
+            # plt.subplots_adjust(left=0.5)
             plt.tight_layout()
             fig_file = os.path.join(fig_d, param, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
             plt.savefig(fig_file, bbox_inches='tight')
             plt.close()
             target_timescales.append((month, x + 1, y + 1))
-            print('{:.3f} {}'.format(grid.values[y, x], os.path.basename(fig_file)))
+            print('{:.3f} {}'.format(grid[y, x], os.path.basename(fig_file)))
 
     print('max correlation timescales: \n', target_timescales)
 
@@ -142,7 +141,7 @@ def fields_heatmap(csv, attrs, fig_d):
 
             title = 'Correlation'
 
-            combos = [('SPEI', 'SCUI')]
+            combos = [('SPEI', 'SIMI')]
 
             for met, use in combos:
                 grid = np.zeros((len(use_periods), len(met_periods)))
@@ -151,7 +150,7 @@ def fields_heatmap(csv, attrs, fig_d):
                         slice_ = tdf['met{}_ag{}_fr{}'.format(m, u, month)].values
                         grid[i, j] = np.mean(slice_)
 
-                grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid)
+                grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid).values
                 ax = sns.heatmap(grid, square=True, annot=True, cmap='magma', fmt='.3g')
                 y, x = np.unravel_index(np.argmax(np.abs(grid), axis=None), grid.shape)
                 ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
@@ -166,7 +165,7 @@ def fields_heatmap(csv, attrs, fig_d):
                 fig_file = os.path.join(fig_d, part, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
                 plt.savefig(fig_file, bbox_inches='tight')
                 plt.close()
-                print('{:.3f} {}'.format(grid.values[y, x], os.path.basename(fig_file)))
+                print('{:.3f} {}'.format(grid[y, x], os.path.basename(fig_file)))
 
 
 if __name__ == '__main__':
