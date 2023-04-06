@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta as reldt
 
-# from utils.cdl import cdl_key
+from field_points.crop_codes import cdl_key
 
 DEFAULTS = {'draws': 1000,
             'tune': 1000}
@@ -160,20 +160,5 @@ if __name__ == '__main__':
 
     transitions_ = os.path.join(root, 'analysis/transition')
     model_dir_ = os.path.join(transitions_, 'models')
-
-    from_price_ = os.path.join(transitions_, 'fprice.json')
-    to_price_ = os.path.join(transitions_, 'tprice.json')
-    climate_ = os.path.join(transitions_, 'spei.json')
-    glob = 'model_sft'
-
-    model_dir = os.path.join(transitions_, 'models')
-    sample_data = os.path.join(transitions_, 'sample_data')
-
-    if samples_:
-        glb = 'sample_{}'.format(samples_)
-    else:
-        glb = 'sample'.format(samples_)
-
-    data_to_json(climate_, from_price_, to_price_, sample_data, samples=samples_, glob=glb)
 
 # ========================= EOF ====================================================================
