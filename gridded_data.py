@@ -7,7 +7,7 @@ from calendar import monthrange
 import numpy as np
 import ee
 
-from utils.cdl import get_cdl
+from utils.ee_utils import get_cdl
 
 BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
@@ -248,7 +248,7 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
                 with open('field_points/tiles.json', 'r') as f_obj:
                     tiles = json.load(f_obj)
 
-                for st in ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']:
+                for st in ['PK']:
 
                     fc = ee.FeatureCollection(os.path.join(tables, st))
 
@@ -264,7 +264,7 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
                                                    reducer=ee.Reducer.mean(),
                                                    scale=30)
 
-                        # debug = data.filterMetadata('OPENET_ID', 'equals', 'CA_286046').first().getInfo()
+                        # debug = data.filterMetadata('OPENET_ID', 'equals', 'MT_1').first().getInfo()
 
                         task = ee.batch.Export.table.toCloudStorage(
                             data,
@@ -323,6 +323,8 @@ def ee_task_start(task, n=6):
 if __name__ == '__main__':
     bucket = 'wudr'
     table_ = 'users/dgketchum/expansion/fields'
-    get_field_itype(table_, bucket, 2021, 'openet_itype')
+    extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields', join_col='OPENET_ID', geo_type='fields',
+                      volumes=True, masks=True)
+    # get_field_itype(table_, bucket, 2021, 'openet_itype')
 
 # ========================= EOF ================================================================================
