@@ -6,6 +6,9 @@ import numpy as np
 import arviz as az
 import pandas as pd
 import pymc as pm
+
+import seaborn as sns
+import matplotlib.pyplot as plt
 from scipy.special import softmax
 
 from field_points.crop_codes import cdl_key
@@ -114,7 +117,7 @@ def test_on_irrmapper():
 
     x_test, x, y_test, y = x[:3000].values, x[3000:].values, y[:3000], y[3000:]
 
-    features = ['nd', 'lst', 'rnd']
+    features = ['NDVI', 'LST', 'RAND']
     d = {'x': x, 'y': y, 'features': features, 'counts': counts, 'labels': labels}
 
     y_test_p = pd.get_dummies(y_test).values.T
@@ -124,16 +127,15 @@ def test_on_irrmapper():
         rdev = -2 * loglik
         return rdev
 
-    null = dev(y_test_p, np.mean(y_test_p, axis=0))
-
     model_file_ = 'irr_model.nc'
     if not os.path.exists(model_file_):
         softmax_regression(d, model_file_, cores=4)
     trace = az.from_netcdf(model_file_)
+    df = az.summary(trace)
 
-    summary = az.summary(trace)
-    a = summary['mean'][:4].values.reshape(4, 1)
-    b = summary['mean'][4:].values.reshape((len(counts), len(features)))
+    null = dev(y_test_p, np.mean(y_test_p, axis=0))
+    a = df['mean'][:4].values.reshape(4, 1)
+    b = df['mean'][4:].values.reshape((len(counts), len(features)))
 
     # full
     z = a + np.dot(b, x_test.T)
@@ -143,15 +145,53 @@ def test_on_irrmapper():
     # climate-only
     z = a + np.dot(b[:, 0, np.newaxis], x_test[:, 0, np.newaxis].T)
     p = pm.math.softmax(z, axis=0).eval()
-    climate = dev(y_test_p, p)
+    nd = dev(y_test_p, p)
+    nd_dev = (nd - full) / null
 
     z = a + np.dot(b[:, 1, np.newaxis], x_test[:, 1, np.newaxis].T)
     p = pm.math.softmax(z, axis=0).eval()
-    fprice = dev(y_test_p, p)
+    lst = dev(y_test_p, p)
+    lst_dev = (lst - full) / null
 
     z = a + np.dot(b[:, 2, np.newaxis], x_test[:, 2, np.newaxis].T)
     p = pm.math.softmax(z, axis=0).eval()
-    tprice = dev(y_test_p, p)
+    rnd = dev(y_test_p, p)
+    rnd_dev = (rnd - full) / null
+
+    labels = [int(x) for x in list(trace.posterior['a'].labels.values)]
+    out_keys = [0, 1, 2, 3]
+    names = ['irrigated', 'dryland', 'uncultivated', 'wetland']
+    label_idx = [labels.index(c) for c in out_keys if c in labels]
+
+    alpha = trace.posterior['a'].values
+    alpha = alpha.reshape(alpha.shape[0] * alpha.shape[1], -1)
+    dct = {'a[{}]'.format(k): alpha[:, i] for i, k in zip(label_idx, out_keys)}
+
+    coeffs = trace.posterior['b'].features.values
+    arr = trace.posterior['b'].values
+    arr = arr.reshape(arr.shape[0] * arr.shape[1], arr.shape[2], -1)
+    for i, c in enumerate(coeffs):
+        for j, k in zip(label_idx, out_keys):
+            dct['b[{}, {}]'.format(c, k)] = arr[:, i, j]
+    data_df = pd.DataFrame(dct)
+
+    min_max_cols = [i for i in df.index if not i.startswith('a')]
+
+    min_, max_ = data_df[min_max_cols].values.flatten().min(), data_df[min_max_cols].values.flatten().max()
+    fig, ax = plt.subplots(1, 4, figsize=(16, 8))
+    for i, (name, key) in enumerate(zip(names, out_keys)):
+        cols = [i for i in df.index if str(key) in i and 'a' not in i]
+        data = data_df[cols]
+        sns.boxplot(data, ax=ax[i])
+        ax[i].set_xticklabels(coeffs)
+        ax[i].title.set_text(name)
+        ax[i].set_ylim([min_, max_])
+
+    plt.suptitle('IrrMapper Normalized Deviance Increase From Full Model\n'
+                 'NDVI: {:.3f}, Land Surface Temp: {:.3f}, Random Variable: {:.3f}'.format(nd_dev,
+                                                                                           lst_dev,
+                                                                                           rnd_dev))
+    plt.savefig('/home/dgketchum/Downloads/IrrMapper_DevPerm.png')
 
 
 if __name__ == '__main__':
