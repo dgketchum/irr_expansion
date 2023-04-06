@@ -5,6 +5,8 @@ from multiprocessing import Pool
 import numpy as np
 import arviz as az
 import pandas as pd
+import pymc as pm
+from scipy.special import softmax
 
 from field_points.crop_codes import cdl_key
 from transition_models import softmax_regression
@@ -101,6 +103,57 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
         print(ofile)
 
 
+def test_on_irrmapper():
+    irr = '/media/research/IrrigationGIS/irrmapper/EE_extracts/concatenated/state/AZ_22NOV2021.csv'
+    df = pd.read_csv(irr).sample(n=10000)
+    y = df['POINT_TYPE'].values
+    labels, counts = np.unique(y, return_counts=True)
+    df['rnd'] = np.random.rand(df.shape[0]) + 10
+    x = df[['nd_mean_gs', 'B10_gs', 'rnd']]
+    x = np.subtract(x, x.mean(axis=0)).divide(x.std(axis=0))
+
+    x_test, x, y_test, y = x[:3000].values, x[3000:].values, y[:3000], y[3000:]
+
+    features = ['nd', 'lst', 'rnd']
+    d = {'x': x, 'y': y, 'features': features, 'counts': counts, 'labels': labels}
+
+    y_test_p = pd.get_dummies(y_test).values.T
+
+    def dev(true, pred):
+        loglik = np.sum(true * np.log(pred))
+        rdev = -2 * loglik
+        return rdev
+
+    null = dev(y_test_p, np.mean(y_test_p, axis=0))
+
+    model_file_ = 'irr_model.nc'
+    if not os.path.exists(model_file_):
+        softmax_regression(d, model_file_, cores=4)
+    trace = az.from_netcdf(model_file_)
+
+    summary = az.summary(trace)
+    a = summary['mean'][:4].values.reshape(4, 1)
+    b = summary['mean'][4:].values.reshape((len(counts), len(features)))
+
+    # full
+    z = a + np.dot(b, x_test.T)
+    p = pm.math.softmax(z, axis=0).eval()
+    full = dev(y_test_p, p)
+
+    # climate-only
+    z = a + np.dot(b[:, 0, np.newaxis], x_test[:, 0, np.newaxis].T)
+    p = pm.math.softmax(z, axis=0).eval()
+    climate = dev(y_test_p, p)
+
+    z = a + np.dot(b[:, 1, np.newaxis], x_test[:, 1, np.newaxis].T)
+    p = pm.math.softmax(z, axis=0).eval()
+    fprice = dev(y_test_p, p)
+
+    z = a + np.dot(b[:, 2, np.newaxis], x_test[:, 2, np.newaxis].T)
+    p = pm.math.softmax(z, axis=0).eval()
+    tprice = dev(y_test_p, p)
+
+
 if __name__ == '__main__':
 
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
@@ -137,23 +190,5 @@ if __name__ == '__main__':
     # multiproc_model(sample_data_, model_dst=model_dir, multiproc=30, glob=glob_)
     # summarize_pymc_model(model_dir, summaries, sample_data_)
 
-    irr = '/media/research/IrrigationGIS/irrmapper/EE_extracts/concatenated/state/AZ_22NOV2021.csv'
-    df = pd.read_csv(irr).sample(n=10000)
-    df = df.loc[df['POINT_TYPE'].apply(lambda x: x in [0, 2])]
-    y = df['POINT_TYPE'].values
-    y[y == 0] = 1
-    y[y]
-    labels, counts = np.unique(y, return_counts=True)
-    df['rnd'] = np.random.rand(df.shape[0]) + 10
-    x = df[['nd_mean_gs', 'B10_gs', 'rnd']]
-    x = np.subtract(x, x.mean(axis=0)).divide(x.std(axis=0))
-    d = {'x': x, 'y': y, 'features': ['nd', 'lst', 'rnd'], 'counts': counts, 'labels': labels}
-    model_file_ = 'irr_model.nc'
-    softmax_regression(d, model_file_, cores=4)
-
-    # from sklearn.linear_model import LogisticRegression
-    # lr = LogisticRegression()
-    # lr.fit(x, y)
-    # pass
-
+    test_on_irrmapper()
 # ========================= EOF ====================================================================
