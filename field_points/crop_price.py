@@ -8,8 +8,8 @@ from nasspython.nass_api import nass_data
 from climate_indices.indices import spi, Distribution, compute
 
 from gridded_data import BASIN_STATES
-from utils.cdl import nass_monthly_price_queries, nass_annual_price_queries
-from utils.cdl import study_area_crops, ppi_to_cdl_crop
+from field_points.crop_codes import nass_monthly_price_queries, nass_annual_price_queries
+from field_points.crop_codes import study_area_crops, ppi_to_cdl_crop
 from utils.placenames import state_name_abbreviation
 
 KWARGS = dict(scale=9,

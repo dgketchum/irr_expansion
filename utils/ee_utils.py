@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import ee
 
-from utils.cdl import remap_cdl
+from field_points.crop_codes import remap_cdl
 
 
 def get_world_climate(months, param='prec'):

@@ -8,7 +8,7 @@ from sklearn.metrics import mean_squared_error
 from sklearn.linear_model import LinearRegression
 from fuzzywuzzy import process
 
-from utils.cdl import cdl_key
+from field_points.crop_codes import cdl_key
 
 import warnings
 
@@ -33,7 +33,6 @@ def planting_area_prediction(price_csv, area_js, keys, files_js, timescales, mod
     code_files = {k: os.path.join(price_csv, v) for k, v in code_files.items() if k in incl}
 
     opt_flag, opt_tlag = None, None
-    fcode, tcode, rmse_min = None, None, None
     lags = {}
 
     for fcode, tcode in keys:
@@ -99,7 +98,7 @@ def planting_area_prediction(price_csv, area_js, keys, files_js, timescales, mod
 if __name__ == '__main__':
     deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'
     files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'
-    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timesereies.json'
+    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timeseries.json'
     transition_keys = '/media/research/IrrigationGIS/expansion/analysis/transition/keys.json'
     time_scales = '/media/research/IrrigationGIS/expansion/analysis/transition/time_scales.json'
     planting_area_prediction(deflated, cdl_area_, transition_keys, files_, mode='mv', timescales=time_scales)

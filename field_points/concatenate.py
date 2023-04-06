@@ -20,7 +20,7 @@ def concatenate_field_data(csv_dir, metadata, out, file_check=False, glob=None,
     if cdl_dir:
         COLS.append('CDL')
 
-    for s in BASIN_STATES[1:]:
+    for s in ['MT']:
 
         tiles = tile_dct[s]
         mdata = os.path.join(metadata, '{}.csv'.format(s))
@@ -172,16 +172,23 @@ if __name__ == '__main__':
     meta_ = os.path.join(root, 'field_pts/fields_data/fields_shp')
 
     itype_data = '/media/research/IrrigationGIS/expansion/tables/itype'
-    cdl_data = '/media/research/IrrigationGIS/expansion/tables/cdl'
+    cdl_data = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
 
     # fpd = os.path.join(root, 'field_pts/fields_data/fields_npy')
     # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
     #                        file_check=False, itype_dir=itype_data)
 
-    fpd = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
+    # fpd = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
     # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
     #                        file_check=False, cdl_dir=cdl_data)
 
-    et_csv_ = os.path.join(root, 'field_pts/csv/et')
-    mean_et(et_csv_, glb='ietr_fields_13FEB2023')
+    park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
+    csv_ = os.path.join(park, 'csv')
+    npy = os.path.join(park, 'npy')
+    meta_ = os.path.join(park, 'fields_shp')
+    # concatenate_field_data(csv_, meta_, npy, glob='park_fields',
+    #                        file_check=False, itype_dir=itype_data)
+
+    # et_csv_ = os.path.join(root, 'field_pts/csv/et')
+    # mean_et(et_csv_, glb='ietr_fields_13FEB2023')
 # ========================= EOF ====================================================================

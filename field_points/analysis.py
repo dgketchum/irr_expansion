@@ -7,7 +7,7 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from call_ee import BASIN_STATES
+from concatenate import BASIN_STATES
 from climate_indices import compute, indices
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
@@ -158,7 +158,7 @@ def partition_data(npy, out_dir, calc='simi', classification='usbr'):
             states = BASIN_STATES
             join_column = 'index'
 
-        for state in states:
+        for state in ['PK']:
 
             npy_file = os.path.join(npy, '{}.npy'.format(state, state))
             print(npy_file)
@@ -256,5 +256,13 @@ if __name__ == '__main__':
     part = 'cdl'
     indir = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
     part_ = os.path.join(root, 'field_pts/fields_data/partitioned_npy/{}'.format(part))
-    partition_data(indir, part_, classification=part)
+    # partition_data(indir, part_, classification=part)
+
+    part = 'usbr'
+    park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
+    npy = os.path.join(park, 'npy')
+    parts = os.path.join(park, 'partitioned_npy')
+    indices_ = os.path.join(park, 'indices')
+    # partition_data(npy, parts, classification=part)
+    # correlations('PK', npy, indices_, procs=3, calc='simi')
 # ========================= EOF ====================================================================

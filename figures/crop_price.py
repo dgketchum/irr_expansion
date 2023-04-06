@@ -4,7 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from utils.cdl import ppi_to_cdl_crop, study_area_crops
+from field_points.crop_codes import ppi_to_cdl_crop, study_area_crops
 from gridded_data import BASIN_STATES
 
 

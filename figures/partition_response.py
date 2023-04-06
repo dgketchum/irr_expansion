@@ -8,9 +8,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from field_points.itype_mapping import itype_integer_mapping
-from utils.cdl import cdl_key
+from field_points.crop_codes import cdl_key
 
 np.random.seed(1234)
+palette = sns.color_palette()
 
 
 def partition_usbr_response(npy, out_fig):
@@ -38,7 +39,9 @@ def partition_usbr_response(npy, out_fig):
                 print('{} {}: {:.3f}, {:.3f}, {} values'.format(clss, mng, np.median(v), iqr, len(v)))
 
         df.drop(columns=['month'], inplace=True)
-        sns.violinplot(data=df, x='Class', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'])
+        sns.violinplot(data=df, x='Class', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'],
+                       palette=palette[:2])
+
         plt.suptitle('Western Irrigation Management {}'.format(ts))
         ofig = os.path.join(out_fig, ts)
         plt.legend(ncol=2)
@@ -86,8 +89,8 @@ def partition_itype_response(npy, out_fig):
                 print('{} {}: {:.3f}, {:.3f}, {} values'.format(clss, itype[itp], np.median(v), iqr, len(v)))
 
         df.drop(columns=['itype', 'month'], inplace=True)
-        sns.violinplot(data=df, x='Class', y='SIMI', hue='Infrastructure',
-                       order=['Dry', 'Normal', 'Wet'])
+        sns.violinplot(data=df, x='Class', y='SIMI', hue='Infrastructure', order=['Dry', 'Normal', 'Wet'],
+                       palette=palette[2:6])
 
         plt.suptitle('{} Irrigation Management and Irrigation Type\n'
                      '{}-Month SPEI, Irrigated Fields {} 1 to {} {}'.format(month, met, start_month,
@@ -95,10 +98,10 @@ def partition_itype_response(npy, out_fig):
         ofig = os.path.join(out_fig, '{}.png'.format(ts))
         legend = plt.legend(ncol=2)
 
-        for i in range(len(counts)):
-            class_ = legend.get_texts()[i]._text
-            new_txt = '{}: log(n) = {:.1f}'.format(class_, np.log10(counts[class_]))
-            legend.get_texts()[i].set_text(new_txt)
+        # for i in range(len(counts)):
+        #     class_ = legend.get_texts()[i]._text
+        #     new_txt = '{}: log(n) = {:.1f}'.format(class_, np.log10(counts[class_]))
+        #     legend.get_texts()[i].set_text(new_txt)
 
         plt.savefig(ofig)
         plt.close()
@@ -145,7 +148,7 @@ def partition_cdl_response(npy, out_fig):
         df['Crop'] = df['cdl'].apply(lambda x: classes[x])
         df.drop(columns=['cdl', 'month'], inplace=True)
         sns.violinplot(data=df, x='Class', y='SIMI', hue='Crop',
-                       order=['Dry', 'Normal', 'Wet'])
+                       order=['Dry', 'Normal', 'Wet'], palette=palette[6:])
 
         plt.suptitle('{} Irrigation Management and Irrigation Type\n'
                      '{}-Month SPEI, Irrigated Fields {} 1 to {} {}'.format(month, met, start_month,
@@ -153,13 +156,13 @@ def partition_cdl_response(npy, out_fig):
         ofig = os.path.join(out_fig, '{}.png'.format(ts))
         legend = plt.legend(ncol=2)
 
-        counts = np.unique(df['Crop'].values, return_counts=True)
-        counts = {counts[0][i]: counts[1][i] for i in range(len(counts[0]))}
+        # counts = np.unique(df['Crop'].values, return_counts=True)
+        # counts = {counts[0][i]: counts[1][i] for i in range(len(counts[0]))}
 
-        for i in range(len(counts)):
-            class_ = legend.get_texts()[i]._text
-            new_txt = '{}: log(n) = {:.1f}'.format(class_, np.log10(counts[class_]))
-            legend.get_texts()[i].set_text(new_txt)
+        # for i in range(len(counts)):
+        #     class_ = legend.get_texts()[i]._text
+        #     new_txt = '{}'.format(class_, np.log10(counts[class_]))
+        #     legend.get_texts()[i].set_text(new_txt)
 
         plt.savefig(ofig)
         plt.close()
@@ -212,8 +215,18 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
+    param = 'usbr'
+    part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
+    out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
+    partition_usbr_response(part_, out_)
+
     param = 'cdl'
     part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
     partition_cdl_response(part_, out_)
+
+    param = 'itype'
+    part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
+    out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
+    partition_itype_response(part_, out_)
 # ========================= EOF ====================================================================

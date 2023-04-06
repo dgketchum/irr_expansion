@@ -95,7 +95,7 @@ if __name__ == '__main__':
 
     crops = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
     areas_ = '/media/research/IrrigationGIS/expansion/tables/cdl/fields_area.json'
-    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timesereies.json'
+    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timeseries.json'
     cdl_area_timeseries(crops, areas_, cdl_area_)
 
 # ========================= EOF ====================================================================
