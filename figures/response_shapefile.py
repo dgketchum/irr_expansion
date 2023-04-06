@@ -53,7 +53,22 @@ def write_response_shapefile(csv, attrs, shp, out_shp, o_json=None):
     match = [i for i in gdf.index if i in df.index]
     gdf = gdf.loc[match]
     gdf['resp'] = df.loc[match, 'met4_ag3_fr8']
+
+    cols = [c for c in df.columns if c.startswith('met')]
+    max_ = df[cols].max(axis=1)
+    df = df[cols].idxmax(axis=1)
+    df = pd.DataFrame(df, columns=['str'])
+    df['met'] = df['str'].apply(lambda x: int(x.split('_')[0].strip('met')))
+    df['ag'] = df['str'].apply(lambda x: int(x.split('_')[1].strip('ag')))
+    df['fr'] = df['str'].apply(lambda x: int(x.split('_')[2].strip('fr')))
+    df['max'] = max_
+
+    gdf['met'] = df.loc[match, 'met']
+    gdf['ag'] = df.loc[match, 'ag']
+    gdf['fr'] = df.loc[match, 'fr']
+    gdf['max'] = df.loc[match, 'max']
     gdf.drop(columns=['OPENET_ID'], inplace=True)
+    print(gdf.shape)
     gdf.to_file(out_shp, crs='EPSG:5071')
 
 
@@ -121,5 +136,12 @@ if __name__ == '__main__':
     ojs_ = os.path.join(root, 'field_pts/indices/response_json')
 
     # write_response_shapefile(in_, meta, s, oshp, None)
-    write_response_histogram(in_, meta, out_)
+    # write_response_histogram(in_, meta, out_)
+
+    park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
+    indices_ = os.path.join(park, 'indices', 'simi')
+    csv_ = os.path.join(park, 'fields_shp')
+    ishp_ = os.path.join(park, 'fields_shp', 'park_select.shp')
+    oshp_ = os.path.join(park, 'fields_shp', 'park_response.shp')
+    write_response_shapefile(indices_, csv_, ishp_, oshp_, o_json=None)
 # ========================= EOF ====================================================================
