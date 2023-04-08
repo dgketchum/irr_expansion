@@ -57,7 +57,7 @@ def run_model(sample_data, model_dir=None, glob=None, cores=4):
         softmax_regression(d, model_file, cores=cores)
 
 
-def summarize_pymc_model(saved_model, coeff_summary, input_data):
+def summarize_pymc_model(saved_model, coeff_summary, input_data, deviance_file):
     cdl = cdl_key()
 
     l = [os.path.join(saved_model, x) for x in os.listdir(saved_model) if x.endswith('.nc')]
@@ -66,6 +66,7 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
     with open(input_data, 'r') as f_obj:
         stations = json.load(f_obj)
 
+    devdf = pd.DataFrame(columns=['from_price', 'to_price', 'climate'], index=k)
     for f, crop in zip(l, k):
         d = stations[crop]
         print(cdl[int(crop)][0])
@@ -101,7 +102,10 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
             d1 = dev(y_test_p, p)
             dev_ = (d1 - full) / null
             deviances[feat] = dev_
+            if dev_ < 0.:
+                a = 1
 
+        devdf.loc[crop] = deviances
         reind, counts, labels, coeff, crop_name = [], [], [], [], []
         for ct, label in zip(d['counts'], d['labels']):
             reind.append('a[{}]'.format(label))
@@ -129,6 +133,8 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data):
         df = df[['label', 'coeff', 'mean', 'sd', 'counts', 'hdi_2.5%', 'hdi_97.5%', 'crop', 'dev']]
         df.to_csv(ofile)
         print(ofile)
+
+    devdf.to_csv(deviance_file)
 
 
 if __name__ == '__main__':
@@ -161,9 +167,10 @@ if __name__ == '__main__':
     model_dir = os.path.join(transitions_, 'models')
     summaries = os.path.join(transitions_, 'summaries')
     sample_data_ = os.path.join(transitions_, 'sample_data', '{}.json'.format(glb))
+    dev_summary = os.path.join(transitions_, 'summaries', 'deviances.csv')
 
     # data_to_json(climate_, from_price_, to_price_, sample_data, samples=sample, glob=glb)
     # run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
     # multiproc_model(sample_data_, model_dst=model_dir, multiproc=30, glob=glob_)
-    summarize_pymc_model(model_dir, summaries, sample_data_)
+    summarize_pymc_model(model_dir, summaries, sample_data_, dev_summary)
 # ========================= EOF ====================================================================
