@@ -8,6 +8,7 @@ import pandas as pd
 
 from gridded_data import BASIN_STATES
 from field_points.crop_codes import cdl_key
+from transition_modeling.transition_data import KEYS
 
 
 def get_openet_cdl(in_dir, join_csv, out_dir):
@@ -53,7 +54,7 @@ def get_openet_cdl(in_dir, join_csv, out_dir):
     pprint(dct)
 
 
-def cdl_area_timeseries(cdl_dir, area_json, out_json):
+def cdl_area_studywide_timeseries(cdl_dir, area_json, out_json):
     with open(area_json, 'r') as _file:
         areas = json.load(_file)
 
@@ -88,14 +89,64 @@ def cdl_area_timeseries(cdl_dir, area_json, out_json):
         json.dump(dct, fp, indent=4)
 
 
-if __name__ == '__main__':
-    root = '/media/research/IrrigationGIS'
-    if not os.path.exists(root):
-        root = '/home/dgketchum/data/IrrigationGIS'
+def cdl_area_huc_timeseries(cdl_dir, area_json, huc, out_json):
+    with open(area_json, 'r') as _file:
+        areas = json.load(_file)
 
-    crops = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
-    areas_ = '/media/research/IrrigationGIS/expansion/tables/cdl/fields_area.json'
-    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timeseries.json'
-    cdl_area_timeseries(crops, areas_, cdl_area_)
+    area = pd.DataFrame(index=[k for k, v in areas.items()], data=[v for k, v in areas.items()], columns=['area'])
+    huc = pd.read_csv(huc, index_col='OPENET_ID')
+    match = [i for i in huc.index if i in area.index]
+    area.loc[match, 'huc'] = huc.loc[match, 'huc8']
+    area.dropna(inplace=True, axis=0)
+
+    l = [os.path.join(cdl_dir, x) for x in os.listdir(cdl_dir)]
+    first = True
+    for csv in l:
+        if first:
+            df = pd.read_csv(csv, index_col='OPENET_ID')
+            first = False
+        else:
+            c = pd.read_csv(csv, index_col='OPENET_ID')
+            df = pd.concat([df, c])
+
+    match = [i for i in df.index if i in area.index]
+    df = df.loc[match]
+    df[df.values < 0] = np.nan
+    for c in df.columns:
+        area[c] = area['area']
+    area.drop(columns=['area'], inplace=True)
+
+    dct = {}
+    for c in KEYS:
+        a_vals, c_vals = area[df.columns].values.copy(), df.values.copy()
+        a_vals[c_vals != c] = np.nan
+        hdf = pd.DataFrame(data=a_vals, columns=df.columns, index=df.index)
+        hdf['huc'] = area['huc'].values.astype(int)
+        hdf = hdf.groupby('huc').sum()
+        top = hdf.mean(axis=1).sort_values().index[-20:]
+        hdf = hdf.loc[top]
+        hdf[hdf.values == 0.0] = np.nan
+        hdf.dropna(inplace=True, axis=0)
+        print(hdf.shape[0], c)
+        dct[c] = {i: [v for v in r] for i, r in hdf.iterrows()}
+
+    with open(out_json, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
+if __name__ == '__main__':
+    root = '/media/research/IrrigationGIS/expansion'
+    if not os.path.exists(root):
+        root = '/home/dgketchum/data/IrrigationGIS/expansion'
+
+    crops = os.path.join(root, 'tables/cdl/crops')
+    areas_ = os.path.join(root, 'tables/cdl/fields_area.json')
+    cdl_area_ = os.path.join(root, 'tables/cdl/cdl_area_timeseries.json')
+    # cdl_area_studywide_timeseries(crops, areas_, cdl_area_)
+
+    huc = os.path.join(root, 'field_pts/fields_shp_huc/centroids_huc.csv')
+    cdl_area_ = os.path.join(root, 'tables/cdl/cdl_huc_area_timeseries.json')
+    cdl_area_huc_timeseries(crops, areas_, huc, cdl_area_)
+
 
 # ========================= EOF ====================================================================
