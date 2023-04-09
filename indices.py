@@ -1,30 +1,32 @@
-import os
 import json
+import os
 
 import numpy as np
+from climate_indices import compute, indices
 from scipy.stats import linregress
 
-from climate_indices import compute, indices
-
 from flow.gage_data import hydrograph
-from figures.plot_indices import plot_indices_panel, plot_indices_panel_nonstream
+from field_points.crop_codes import cdl_key
 
 
-def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, desc_str='basin'):
+def mode(a):
+    vals, cts = np.unique(a, return_counts=True)
+    mode = vals[cts.argmax()]
+    return mode
+
+
+def huc_simi_response(meta, gridded_data, out_meta):
     with open(meta, 'r') as f_obj:
-        stations = json.load(f_obj)
+        basins = json.load(f_obj)
 
     for month_end in range(5, 11):
         dct = {}
-        out_json = os.path.join(out_meta, '{}_{}.json'.format(desc_str, month_end))
-        for sid, sdata in stations.items():
+        out_json = os.path.join(out_meta, 'huc_{}.json'.format(month_end))
+        for huc_id, sdata in basins.items():
 
-            if basins:
-                print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
-            else:
-                print('\n{} {}: {}'.format(month_end, sid, sdata['NAME']))
+            print('\n{} {}: {}'.format(month_end, huc_id, sdata['NAME']))
 
-            _file = os.path.join(gridded_data, '{}.csv'.format(sid))
+            _file = os.path.join(gridded_data, '{}.csv'.format(huc_id))
             try:
                 df = hydrograph(_file)
             except FileNotFoundError:
@@ -34,11 +36,7 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
             df['ppt'] = (df['ppt'] - df['ppt'].min()) / (df['ppt'].max() - df['ppt'].min()) + 0.001
             df['etr'] = (df['etr'] - df['etr'].min()) / (df['etr'].max() - df['etr'].min()) + 0.001
             df['kc'] = df['et'] / df['ietr']
-
-            if basins:
-                df = df[['q', 'cc', 'ppt', 'etr', 'kc']]
-            else:
-                df = df[['irr', 'cc', 'ppt', 'etr', 'kc']]
+            df = df[['irr', 'cc', 'ppt', 'etr', 'kc']]
 
             met_periods = list(range(1, 13)) + [18, 24, 30, 36]
 
@@ -59,24 +57,8 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                                                        calibration_year_initial=1984,
                                                        calibration_year_final=2021,
                                                        periodicity=compute.Periodicity.monthly)
-                if basins:
-                    df['SFI_{}'.format(x)] = indices.spi(df['q'].values,
-                                                         scale=x,
-                                                         distribution=indices.Distribution.gamma,
-                                                         data_start_year=1984,
-                                                         calibration_year_initial=1984,
-                                                         calibration_year_final=2021,
-                                                         periodicity=compute.Periodicity.monthly)
 
             for x in range(1, 8):
-                df['SCUI_{}'.format(x)] = indices.spi(df['cc'].values,
-                                                      scale=x,
-                                                      distribution=indices.Distribution.gamma,
-                                                      data_start_year=1984,
-                                                      calibration_year_initial=1984,
-                                                      calibration_year_final=2021,
-                                                      periodicity=compute.Periodicity.monthly)
-
                 df['SIMI_{}'.format(x)] = indices.spi(df['kc'].values,
                                                       scale=x,
                                                       distribution=indices.Distribution.gamma,
@@ -84,43 +66,18 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                                                       calibration_year_initial=1984,
                                                       calibration_year_final=2021,
                                                       periodicity=compute.Periodicity.monthly)
-                ssfi_key = 'SFI_{}'.format(x)
-                if ssfi_key not in df.columns and basins:
-                    df[ssfi_key] = indices.spi(df['q'].values,
-                                               scale=x,
-                                               distribution=indices.Distribution.gamma,
-                                               data_start_year=1984,
-                                               calibration_year_initial=1984,
-                                               calibration_year_final=2021,
-                                               periodicity=compute.Periodicity.monthly)
 
-            if plot_dir and basins:
-                for met_param in ['SPI_12', 'SPEI_12']:
-                    use_timescale = 2
-                    fig_file = os.path.join(plot_dir, '{}_{}.png'.format(sid, met_param))
-                    plot_indices_panel(df, met_param, use_timescale, month_end, fig_file, title_str=sdata['STANAME'])
+            combos = [('SPI', 'SIMI'), ('SPEI', 'SIMI')]
 
-            elif plot_dir and month_end == 10:
-                for met_param in ['SPI_12', 'SPEI_12']:
-                    use_timescale = 2
-                    fig_file = os.path.join(plot_dir, '{}_{}_{}.png'.format(sid, month_end, met_param))
-                    plot_indices_panel_nonstream(df, met_param, use_timescale, month_end, fig_file,
-                                                 title_str=sdata['NAME'])
-
-            combos = [('SPI', 'SCUI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPEI', 'SIMI')]
-            if basins:
-                combos = [('SPI', 'SFI'), ('SPEI', 'SFI'), ('SFI', 'SCUI'), ('SFI', 'SIMI')]
             df = df.loc['1990-01-01':]
             pdf = df.loc[[x for x in df.index if x.month == month_end]]
-            dct[sid] = {'irr_area': np.nanmean(df['irr'].values) / 1e6}
+            dct[huc_id] = {'irr_area': np.nanmean(df['irr'].values) / 1e6}
+
             for met, use in combos:
                 rmax = 0.0
                 corr_ = [met, use, rmax]
                 for met_ts in met_periods:
-                    if use == 'SFI':
-                        use_periods = range(1, 13)
-                    else:
-                        use_periods = range(1, 8)
+                    use_periods = range(1, 8)
                     for use_ts in use_periods:
                         msel = '{}_{}'.format(met, met_ts)
                         usel = '{}_{}'.format(use, use_ts)
@@ -142,12 +99,99 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, basins=False, des
                         if r2 > rmax:
                             rmax = r2
                             corr_ = [msel, usel, rmax]
-                        dct[sid]['{}_{}'.format(msel, usel)] = {'b': lr.slope, 'p': lr.pvalue,
-                                                                'r2': r2, 'int': lr.intercept}
+                        dct[huc_id]['{}_{}'.format(msel, usel)] = {'b': lr.slope, 'p': lr.pvalue,
+                                                                   'r2': r2, 'int': lr.intercept}
                 print('{} to {}, r2: {:.3f}'.format(*corr_))
 
         with open(out_json, 'w') as f:
             json.dump(dct, f, indent=4)
+
+
+def huc_cdl_response(meta, gridded_data, cdl_area, out_js):
+
+    cdl_k = cdl_key()
+
+    with open(meta, 'r') as f_obj:
+        basins = json.load(f_obj)
+
+    with open(cdl_area, 'r') as f_obj:
+        crops = json.load(f_obj)
+
+    month_analog = list(range(-6, 6))
+    months = list(range(6, 13)) + list(range(1, 6))
+
+    dct = {crop: None for crop in crops.keys()}
+
+    for crop, time_series in crops.items():
+        ts, lb, area = [], [], []
+        huc_ids = list(time_series.keys())
+        for huc_id in huc_ids:
+
+            cdl_ts = time_series[huc_id]
+            # print('\n{}: {}'.format(huc_id, basins[huc_id]['NAME']))
+
+            _file = os.path.join(gridded_data, '{}.csv'.format(huc_id))
+            try:
+                df = hydrograph(_file)
+            except FileNotFoundError:
+                print(_file, 'does not exist, skipping')
+                continue
+
+            df['ppt'] = (df['ppt'] - df['ppt'].min()) / (df['ppt'].max() - df['ppt'].min()) + 0.001
+            df['etr'] = (df['etr'] - df['etr'].min()) / (df['etr'].max() - df['etr'].min()) + 0.001
+            df = df[['irr', 'cc', 'ppt', 'etr']]
+            met_periods = list(range(1, 36))
+
+            for x in met_periods:
+                df[x] = indices.spei(precips_mm=df['ppt'].values,
+                                     pet_mm=df['etr'].values,
+                                     scale=x,
+                                     distribution=indices.Distribution.pearson,
+                                     data_start_year=1984,
+                                     calibration_year_initial=1984,
+                                     calibration_year_final=2021,
+                                     periodicity=compute.Periodicity.monthly)
+
+            rmax, corr_ = 0.0, [None, 0.0, None]
+
+            for i, month in enumerate(month_analog):
+
+                if month < 1:
+                    pdf = df.loc['2007-01-01': '2021-01-01'].copy()
+                else:
+                    pdf = df.loc['2008-01-01': '2022-01-01'].copy()
+
+                pdf = pdf.loc[[x for x in pdf.index if x.month == months[i]]].copy()
+
+                for met_ts in met_periods:
+                    met_ind = pdf[met_ts].values.copy()
+
+                    if np.any(np.isnan(met_ind)):
+                        raise NotImplementedError
+
+                    lr = linregress(met_ind, cdl_ts)
+                    r = lr.rvalue
+                    if abs(r) > abs(rmax) and lr.pvalue < 0.05:
+                        rmax = r
+                        corr_ = [met_ts, rmax, month]
+
+            if corr_[1] == 0.0:
+                continue
+            else:
+                ts.append(corr_[0])
+                lb.append(corr_[2])
+                area.append(np.mean(cdl_ts))
+                # print('{} from {} r: {:.3f}'.format(corr_[0], corr_[2], corr_[1]))
+
+        print('\n\n\n\n{}'.format(cdl_k[int(crop)][0]))
+        area = np.array(area) / sum(area)
+        lb = (np.array(lb) * area).sum()
+        ts = (np.array(ts) * area).sum()
+        dct[crop] = {'lb': months[month_analog.index(int(np.rint(lb)))], 'ts': int(np.rint(ts))}
+        print(dct[crop])
+
+    with open(out_js, 'w') as f:
+        json.dump(dct, f, indent=4)
 
 
 if __name__ == '__main__':
@@ -155,16 +199,13 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_huc8_21FEB2023')
     data_ = os.path.join(root, 'metadata', 'huc8_metadata.json')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_huc8_21FEB2023')
     out_js = os.path.join(root, 'analysis', 'huc8_sensitivities')
-    figs = os.path.join(root, 'figures', 'panel', 'ietr_huc8_21FEB2023')
-    write_indices(data_, merged, out_js, plot_dir=figs, basins=False, desc_str='huc8')
+    # huc_simi_response(data_, merged, out_js)
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_basins_21FEB2023')
-    data_ = os.path.join(root, 'metadata', 'irrigated_gage_metadata.json')
-    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    figs = os.path.join(root, 'figures', 'panel', 'ietr_basins_21FEB2023')
-    # write_indices(data_, merged, out_js, plot_dir=figs, basins=True, desc_str='usbr')
+    out_js = os.path.join(root, 'analysis', 'cdl_spei_timescales.json')
+    cdl_area_ = os.path.join(root, 'tables/cdl/cdl_huc_area_timeseries.json')
+    huc_cdl_response(data_, merged, cdl_area_, out_js)
 
 # ========================= EOF ====================================================================
