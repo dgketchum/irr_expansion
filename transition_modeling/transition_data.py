@@ -12,7 +12,9 @@ from field_points.crop_codes import cdl_key
 DEFAULTS = {'draws': 1000,
             'tune': 1000}
 
-KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 47, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
+OLD_KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
+
+KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53]
 
 
 def _open_js(file_):
@@ -96,19 +98,14 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
     cdl = cdl_key()
     time_series_length = 17
-    rec = np.fromfile(cdl_npy, dtype=float).reshape((4, -1, time_series_length))
-    set_, classes = [x for x in prices.keys()], [cdl[c][0] for c in prices.keys()]
+    params = 5
+    rec = np.fromfile(cdl_npy, dtype=float).reshape((params, -1, time_series_length))
+    set_, classes = [x for x in KEYS], [cdl[c][0] for c in KEYS]
+    prices = {k: v for k, v in prices.items() if k in KEYS}
 
     set_ = [s for s in set_ if s > 0]
-    keys = list((combinations(set_, 2)))
-    opposites = [(s, f) for f, s in keys]
-    [keys.append(o) for o in opposites]
-    [keys.append((i, i)) for i in set_]
-    keys = ['{}_{}'.format(a, b) for a, b in keys]
-
-    spei = {k: [] for k in keys}
-    fprice = {k: [] for k in keys}
-    tprice = {k: [] for k in keys}
+    spei = {k: [] for k in set_}
+    tprice = {k: [] for k in set_}
 
     rec = np.moveaxis(rec, 0, 1)
     ct = 0
@@ -116,24 +113,24 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
     for i, v in enumerate(rec):
         for e, c in enumerate(v.T):
 
-            if e == 16 or e < 2:
+            if e < 2:
                 continue
 
-            fc, tc = int(c[3]), int(v.T[e + 1, 3])
+            tc = int(c[3])
 
-            if not (fc in set_ and tc in set_):
+            if tc not in set_:
                 continue
 
-            trans = '{}_{}'.format(fc, tc)
-            fl, tl = timescale[trans]['flag'], timescale[trans]['tlag']
             y = e + 2005
+            tl = timescale['{}_{}'.format(tc, tc)]['tlag']
             ref_time = pd.to_datetime('{}-05-01'.format(y))
-            fprice_lag_str = (ref_time - reldt(months=fl)).strftime('%Y-%m-%d')
             tprice_lag_str = (ref_time - reldt(months=tl)).strftime('%Y-%m-%d')
-            fprice[trans].append(prices[fc][fprice_lag_str])
-            tprice[trans].append(prices[tc][tprice_lag_str])
-
-            spei[trans].append(c[1])
+            try:
+                price = prices[tc][tprice_lag_str]
+            except KeyError:
+                continue
+            tprice[tc].append(price)
+            spei[tc].append(c[0])
 
             ct += 1
 
@@ -142,7 +139,7 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
 
     print('{} transtions'.format(ct))
 
-    outs = zip([fprice, tprice, spei], ['fprice', 'tprice', 'spei'])
+    outs = zip([tprice, spei], ['tprice', 'spei'])
     for d, price_files in outs:
         d = {'{}'.format(k): v for k, v in d.items()}
         out_js = os.path.join(out_matrix, '{}.json'.format(price_files))
@@ -158,7 +155,15 @@ if __name__ == '__main__':
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
         samples_ = 10000
 
-    transitions_ = os.path.join(root, 'analysis/transition')
+    mode_ = 'uv'
+    transitions_ = os.path.join(root, 'analysis/transition/uv_price')
     model_dir_ = os.path.join(transitions_, 'models')
+    met_cdl = '/media/nvm/field_pts/fields_data/cdl_spei/cdl_spei.npy'
+    files_ = os.path.join(root, 'tables/crop_value/price_files.json')
+    response_timescale_ = os.path.join(root, 'analysis/transition/{}_price/time_scales.json'.format(mode_))
+    crop_transitions(met_cdl, files_, response_timescale_, transitions_)
+
+    to_price_ = os.path.join(transitions_, 'tprice.json')
+    climate_ = os.path.join(transitions_, 'spei.json')
 
 # ========================= EOF ====================================================================
