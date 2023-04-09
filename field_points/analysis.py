@@ -9,6 +9,7 @@ import pandas as pd
 
 from concatenate import BASIN_STATES
 from climate_indices import compute, indices
+from transition_modeling.transition_data import KEYS
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
@@ -158,7 +159,7 @@ def partition_data(npy, out_dir, calc='simi', classification='usbr'):
             states = BASIN_STATES
             join_column = 'index'
 
-        for state in ['PK']:
+        for state in states:
 
             npy_file = os.path.join(npy, '{}.npy'.format(state, state))
             print(npy_file)
@@ -241,6 +242,81 @@ def partition_data(npy, out_dir, calc='simi', classification='usbr'):
             print('writing ', out_path)
 
 
+def cdl_spei(npy, cdl_timescale, out_dir):
+    with open(cdl_timescale, 'r') as fp:
+        cdl_ts = json.load(fp)
+
+    COLS.append('cdl')
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2005, 2022) for m in range(1, 13)]
+
+    rec, nrec = None, None
+    first = True
+    params, ts_len = 5, 17
+
+    for state in BASIN_STATES:
+
+        npy_file = os.path.join(npy, '{}.npy'.format(state))
+        print(npy_file)
+        js = npy_file.replace('.npy', '_index.json')
+        with open(js, 'r') as fp:
+            dct = json.load(fp)
+            index = dct['index']
+
+        n = int(np.ceil(len(index) / 5e3))
+        indx = split(index, n)
+
+        data_mem = np.fromfile(npy_file)
+        data_mem = data_mem.reshape((len(index), -1, len(COLS)))
+
+        for i, (s_ind, e_ind) in enumerate(indx):
+
+            data = data_mem[s_ind:e_ind, :, :]
+            shape = (params, data.shape[0], ts_len)
+            target = np.zeros(shape)
+
+            for crop in KEYS:
+
+                ts, lb = cdl_ts[str(crop)]['ts'], cdl_ts[str(crop)]['lb']
+
+                if float(crop) not in data[:, :, 6]:
+                    continue
+
+                months = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
+                                     np.array([dt.month for dt in dt_range]))
+
+                lb_ = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
+                                  np.array([lb for _ in dt_range]))
+
+                ts_ = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
+                                  np.array([ts for _ in dt_range]))
+
+                classific = data[:, -len(dt_range):, -1]
+                data = data[:, -len(dt_range):, :]
+
+                # depends on locally modified climate_indices package that takes cwb = ppt - pet as input to spei
+                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
+                spei_ = np.apply_along_axis(lambda x: indices.spei(cwb_mm=x, scale=ts, **IDX_KWARGS),
+                                            arr=cwb, axis=1)
+                if lb > 5:
+                    spei_ = np.roll(spei_, 12, axis=1)
+
+                stack = np.stack([spei_[:, -len(dt_range):], months, classific, ts_, lb_])
+                d = stack[:, stack[1] == float(lb)].reshape((params, len(index[s_ind:e_ind]), ts_len))
+                mask = d[2] == float(crop)
+                target = np.where(mask, d, target)
+
+            if first:
+                rec = d.copy()
+                first = False
+            else:
+                rec = np.append(rec, d, axis=1)
+            print('{}, {} of {}'.format(state, i + 1, n))
+
+    out_path = os.path.join(out_dir, 'cdl_spei.npy')
+    rec.tofile(out_path)
+    print('writing ', out_path)
+
+
 if __name__ == '__main__':
     root = '/media/nvm'
     if not os.path.exists(root):
@@ -249,20 +325,9 @@ if __name__ == '__main__':
     indir = os.path.join(root, 'field_pts/fields_data/fields_npy')
     odir = os.path.join(root, 'field_pts/indices')
 
-    part = 'itype'
-    part_ = os.path.join(root, 'field_pts/fields_data/partitioned_npy/{}'.format(part))
-    # partition_data(indir, part_, classification=part)
-
     part = 'cdl'
+    t_scales = '/media/research/IrrigationGIS/expansion/analysis/cdl_spei_timescales.json'
     indir = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
-    part_ = os.path.join(root, 'field_pts/fields_data/partitioned_npy/{}'.format(part))
-    # partition_data(indir, part_, classification=part)
-
-    part = 'usbr'
-    park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
-    npy = os.path.join(park, 'npy')
-    parts = os.path.join(park, 'partitioned_npy')
-    indices_ = os.path.join(park, 'indices')
-    # partition_data(npy, parts, classification=part)
-    # correlations('PK', npy, indices_, procs=3, calc='simi')
+    spei = os.path.join(root, 'field_pts/fields_data/cdl_spei')
+    cdl_spei(indir, t_scales, spei)
 # ========================= EOF ====================================================================
