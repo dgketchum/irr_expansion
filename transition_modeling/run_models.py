@@ -9,6 +9,7 @@ import pymc as pm
 
 from field_points.crop_codes import cdl_key
 from transition_models import softmax_regression
+from transition_modeling.transition_data import data_to_json
 
 
 def multiproc_model(sample_data, model_dst, multiproc=20, glob=None):
@@ -47,9 +48,6 @@ def run_model(sample_data, model_dir=None, glob=None, cores=4):
     for fc, d in data.items():
         model_file = os.path.join(model_dir, '{}_{}.nc'.format(glob, fc))
 
-        # if os.path.exists(model_file):
-        #     continue
-
         d['x'] = np.array(d['x'])
         d['y'] = np.array(d['y'])
 
@@ -66,7 +64,7 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data, deviance_file):
     with open(input_data, 'r') as f_obj:
         stations = json.load(f_obj)
 
-    devdf = pd.DataFrame(columns=['from_price', 'to_price', 'climate'], index=k)
+    devdf = pd.DataFrame(columns=['climate', 'from_price', 'to_price'], index=k)
     for f, crop in zip(l, k):
         d = stations[crop]
         print(cdl[int(crop)][0])
@@ -140,37 +138,32 @@ def summarize_pymc_model(saved_model, coeff_summary, input_data, deviance_file):
 if __name__ == '__main__':
 
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
-    sample = 10000
     if not os.path.exists(root):
         sample = None
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
 
     transitions_ = os.path.join(root, 'analysis/transition')
+    to_price_ = os.path.join(transitions_, 'uv_price', 'tprice.json')
+    from_price_ = os.path.join(transitions_, 'uv_price', 'fprice.json')
+    climate_ = os.path.join(transitions_, 'uv_price', 'spei.json')
 
-    glob_ = 'model_sft'
-    mglob_ = 'model_sft_{}.nc'
-    cglob_ = 'model_sft_{}.csv'
+    # if sample:
+    #     glb = 'sample_{}'.format(sample)
+    # else:
+    #     glb = 'sample'.format(sample)
 
-    from_price_ = os.path.join(transitions_, 'fprice.json')
-    to_price_ = os.path.join(transitions_, 'tprice.json')
-    climate_ = os.path.join(transitions_, 'spei.json')
     glob = 'model_sft'
-
-    model_dir = os.path.join(transitions_, 'models')
-    sample_data = os.path.join(transitions_, 'sample_data')
-
-    if sample:
-        glb = 'sample_{}'.format(sample)
-    else:
-        glb = 'sample'.format(sample)
-
-    model_dir = os.path.join(transitions_, 'models')
+    model_dir_ = os.path.join(transitions_, 'models')
     summaries = os.path.join(transitions_, 'summaries')
-    sample_data_ = os.path.join(transitions_, 'sample_data', '{}.json'.format(glb))
     dev_summary = os.path.join(transitions_, 'summaries', 'deviances.csv')
 
-    # data_to_json(climate_, from_price_, to_price_, sample_data, samples=sample, glob=glb)
-    # run_model(sample_data_, glob=glob_, model_dir=model_dir, cores=4)
-    # multiproc_model(sample_data_, model_dst=model_dir, multiproc=30, glob=glob_)
-    summarize_pymc_model(model_dir, summaries, sample_data_, dev_summary)
+    for sample in [10000, 50000]:
+        try:
+            glb = 'sample_{}'.format(sample)
+            sample_data_ = os.path.join(transitions_, 'sample_data', '{}.json'.format(glb))
+            run_model(sample_data_, glob=glob, model_dir=model_dir_, cores=4)
+        except:
+            pass
+    # data_to_json(climate_, from_price_, to_price_, sample_data_, samples=sample, glob=glb)
+    # summarize_pymc_model(model_dir_, summaries, sample_data_, dev_summary)
 # ========================= EOF ====================================================================
