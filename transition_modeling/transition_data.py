@@ -12,8 +12,6 @@ from field_points.crop_codes import cdl_key
 DEFAULTS = {'draws': 1000,
             'tune': 1000}
 
-OLD_KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
-
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53]
 
 
@@ -23,37 +21,37 @@ def _open_js(file_):
     return dct
 
 
-def data_to_json(climate, from_price, to_price, labels_dir, samples, glob):
-    label_file = os.path.join(labels_dir, '{}.json'.format(glob))
+def data_to_json(climate, from_price, to_price, label_file, samples):
     dct = {}
     for fc in KEYS:
-        try:
-            print('\nTransition from Crop: {}'.format(fc))
-            c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
-                                                               from_crop=fc, n_samples=samples)
-            s = pd.Series(labels)
-            one_hot = pd.get_dummies(s).values
-            y = [x.item() for x in np.argmax(one_hot, axis=1)]
-            labels = [str(l) for l in list(set(s))]
-            print(s.shape[0], 'observations of', fc)
 
-            feature_order = ['climate', 'from_price', 'to_price']
-            x = np.array([c_data, fp_data, tp_data]).T
-            x = (x - x.mean(axis=0)) / x.std(axis=0)
+        print('\nTransition from Crop: {}'.format(fc))
+        c_data, fp_data, tp_data, labels, keys = load_data(climate, from_price, to_price,
+                                                           from_crop=fc, n_samples=samples)
+        s = pd.Series(labels)
+        labels, counts = np.unique(s, return_counts=True)
+        label_map = {int(l): i for i, l in enumerate(labels)}
+        counts = {int(l_): int(ct) for l_, ct in zip(labels, counts)}
+        y = s.apply(lambda l: label_map[l])
+        print(s.shape[0], 'observations of', fc)
 
-            dct[fc] = {'x': x.tolist(),
-                       'y': list(y),
-                       'features': feature_order,
-                       'labels': labels,
-                       'counts': list([str(c) for c in one_hot.sum(axis=0)])}
-        except KeyError:
-            print('KeyError, skipping', fc)
+        feature_order = ['climate', 'from_price', 'to_price']
+        x = np.array([c_data, fp_data, tp_data]).T
+        x = (x - x.mean(axis=0)) / x.std(axis=0)
+
+        dct[fc] = {'x': x.tolist(),
+                   'y': list(y),
+                   'features': feature_order,
+                   'labels': [label_map[l_] for l_ in labels],
+                   'label_map': label_map,
+                   'counts': [counts[l_] for l_ in labels],
+                   'counts_map': counts}
 
     with open(label_file, 'w') as fp:
         json.dump(dct, fp, indent=4)
 
 
-def load_data(climate, to_price, from_price, from_crop, n_samples=None):
+def load_data(climate, from_price, to_price, from_crop, n_samples=None):
     climate = _open_js(climate)
     to_price = _open_js(to_price)
     from_price = _open_js(from_price)
@@ -74,6 +72,7 @@ def load_data(climate, to_price, from_price, from_crop, n_samples=None):
     combo = [c for c in combo if np.all(np.isfinite(c))]
     print('dropped {} of {}'.format(len_ - len(combo), len_))
     random.shuffle(combo)
+
     if n_samples:
         c_data[:], fp_data[:], tp_data[:], labels[:] = zip(*combo[:n_samples])
     else:
@@ -104,8 +103,15 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
     prices = {k: v for k, v in prices.items() if k in KEYS}
 
     set_ = [s for s in set_ if s > 0]
-    spei = {k: [] for k in set_}
-    tprice = {k: [] for k in set_}
+    keys = list((combinations(set_, 2)))
+    opposites = [(s, f) for f, s in keys]
+    [keys.append(o) for o in opposites]
+    [keys.append((i, i)) for i in set_]
+    keys = ['{}_{}'.format(a, b) for a, b in keys]
+
+    spei = {k: [] for k in keys}
+    tprice = {k: [] for k in keys}
+    fprice = {k: [] for k in keys}
 
     rec = np.moveaxis(rec, 0, 1)
     ct = 0
@@ -113,47 +119,52 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
     for i, v in enumerate(rec):
         for e, c in enumerate(v.T):
 
-            if e < 2:
+            if e == 16 or e < 2:
                 continue
 
-            tc = int(c[3])
+            fc, tc = int(v.T[e - 1, 2]), int(c[2])
 
-            if tc not in set_:
+            if not (fc in set_ and tc in set_):
                 continue
 
-            y = e + 2005
+            trans = '{}_{}'.format(fc, tc)
             tl = timescale['{}_{}'.format(tc, tc)]['tlag']
+            fl = timescale['{}_{}'.format(fc, fc)]['tlag']
+            y = e + 2005
             ref_time = pd.to_datetime('{}-05-01'.format(y))
             tprice_lag_str = (ref_time - reldt(months=tl)).strftime('%Y-%m-%d')
+            fprice_lag_str = (ref_time - reldt(months=fl)).strftime('%Y-%m-%d')
+
             try:
-                price = prices[tc][tprice_lag_str]
+                tprice_ = prices[tc][tprice_lag_str]
+                fprice_ = prices[fc][fprice_lag_str]
             except KeyError:
                 continue
-            tprice[tc].append(price)
-            spei[tc].append(c[0])
+
+            tprice[trans].append(tprice_)
+            fprice[trans].append(fprice_)
+            spei[trans].append(c[0])
 
             ct += 1
 
-        if i % 10000 == 0.:
+        if i % 10000 == 0. and i > 1:
             print(i)
 
     print('{} transtions'.format(ct))
 
-    outs = zip([tprice, spei], ['tprice', 'spei'])
+    outs = zip([fprice, tprice, spei], ['fprice', 'tprice', 'spei'])
     for d, price_files in outs:
-        d = {'{}'.format(k): v for k, v in d.items()}
+        dc = {'{}'.format(k): v for k, v in d.items()}
         out_js = os.path.join(out_matrix, '{}.json'.format(price_files))
         with open(out_js, 'w') as fp:
-            json.dump(d, fp, indent=4)
+            json.dump(dc, fp, indent=4)
     pass
 
 
 if __name__ == '__main__':
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
-    samples_ = 1000
     if not os.path.exists(root):
         root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
-        samples_ = 10000
 
     mode_ = 'uv'
     transitions_ = os.path.join(root, 'analysis/transition/uv_price')
@@ -162,8 +173,4 @@ if __name__ == '__main__':
     files_ = os.path.join(root, 'tables/crop_value/price_files.json')
     response_timescale_ = os.path.join(root, 'analysis/transition/{}_price/time_scales.json'.format(mode_))
     crop_transitions(met_cdl, files_, response_timescale_, transitions_)
-
-    to_price_ = os.path.join(transitions_, 'tprice.json')
-    climate_ = os.path.join(transitions_, 'spei.json')
-
 # ========================= EOF ====================================================================
