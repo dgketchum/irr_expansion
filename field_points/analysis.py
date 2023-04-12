@@ -9,7 +9,8 @@ import pandas as pd
 
 from concatenate import BASIN_STATES
 from climate_indices import compute, indices
-from transition_modeling.transition_data import KEYS
+from transition_modeling.transition_data import KEYS, OLD_KEYS
+from crops import cdl_key
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
@@ -317,6 +318,71 @@ def cdl_spei(npy, cdl_timescale, out_dir):
     print('writing ', out_path)
 
 
+def cdl_et(npy, out_js):
+    cdl_ = cdl_key()
+    COLS.append('cdl')
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2008, 2022) for m in range(1, 13)]
+    ct = 0
+    params, ts_len, gs_len = 3, 14, 7
+    dct = {}
+
+    for crop in OLD_KEYS:
+
+        cols = ['State', 'crop_code', 'count', 'mean_cc', 'min_cc', 'max_cc', 'std_cc']
+        df = pd.DataFrame(columns=cols)
+
+        for state in BASIN_STATES:
+
+            npy_file = os.path.join(npy, '{}.npy'.format(state))
+            js = npy_file.replace('.npy', '_index.json')
+            with open(js, 'r') as fp:
+                ind_dct = json.load(fp)
+                index = ind_dct['index']
+
+            n = int(np.ceil(len(index) / 5e3))
+            indx = split(index, n)
+
+            data_mem = np.fromfile(npy_file)
+            data_mem = data_mem.reshape((len(index), -1, len(COLS)))
+
+            for i, (s_ind, e_ind) in enumerate(indx):
+
+                data = data_mem[s_ind:e_ind, :, :]
+
+                if float(crop) not in data[:, :, 6]:
+                    continue
+
+                months = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
+                                     np.array([dt.month in list(range(4, 11)) for dt in dt_range]))
+
+                classific = data[:, -len(dt_range):, -1]
+                data = data[:, -len(dt_range):, :]
+                cc = data[:, :, COLS.index('cc')]
+
+                stack = np.stack([cc, months, classific])
+                d = stack[:, stack[1] == 1]
+                d = d.reshape((params, len(index[s_ind:e_ind]), ts_len * gs_len))
+                mask = d[2] == float(crop)
+                d = np.where(mask, d, np.nan)
+                d = np.nansum(d, axis=2) / (np.count_nonzero(~np.isnan(d), axis=2) / 7)
+                d = d[0, :]
+                d = d[~np.isnan(d)]
+
+                try:
+                    df.loc[ct, cols] = [state, crop, d.shape[0], d.mean(), d.min(), d.max(), d.std()]
+                except ValueError:
+                    continue
+
+                ct += 1
+
+        mean_cc = ((df['count'] * df['mean_cc']) / df['count'].sum()).sum()
+        dct[crop] = mean_cc
+        print('{} {}: {:.3f}'.format(crop,  cdl_[crop][0], mean_cc))
+
+    with open(out_js, 'w') as fp:
+        json.dump(dct, fp, indent=4)
+
+
 if __name__ == '__main__':
     root = '/media/nvm'
     if not os.path.exists(root):
@@ -329,5 +395,8 @@ if __name__ == '__main__':
     t_scales = '/media/research/IrrigationGIS/expansion/analysis/cdl_spei_timescales.json'
     indir = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
     spei = os.path.join(root, 'field_pts/fields_data/cdl_spei')
-    cdl_spei(indir, t_scales, spei)
+    # cdl_spei(indir, t_scales, spei)
+
+    ccons = os.path.join(root, 'field_pts/fields_data/cdl_cc.json')
+    cdl_et(indir, ccons)
 # ========================= EOF ====================================================================
