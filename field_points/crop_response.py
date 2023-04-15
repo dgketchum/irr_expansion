@@ -54,7 +54,11 @@ def cdl_response(csv, cdl, out_):
     df.drop(columns=cols, inplace=True)
 
     for k in OLD_KEYS:
-        cdf = df.loc[(df['mode'] == k) & (df['count'] > 10)]
+        if k in [41, 49, 53]:
+            min_yrs = 4
+        else:
+            min_yrs = 10
+        cdf = df.loc[(df['mode'] == k) & (df['count'] > min_yrs)]
         data = cdf['max'].values
         if data.size == 0:
             continue
@@ -71,6 +75,6 @@ if __name__ == '__main__':
     in_ = '/media/nvm/field_pts/indices/simi'
     meta = '/media/nvm/field_pts/fields_data/fields_shp'
     cdl_data = '/media/research/IrrigationGIS/expansion/tables/cdl/crops'
-    summary_out = '/media/research/IrrigationGIS/expansion/analysis/cdl_response.csv'
+    summary_out = '/media/research/IrrigationGIS/expansion/analysis/cdl_response_ID.csv'
     cdl_response(in_, cdl_data, summary_out)
 # ========================= EOF ====================================================================

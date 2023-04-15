@@ -72,21 +72,25 @@ def write_response_shapefile(csv, attrs, shp, out_shp, o_json=None):
     gdf.to_file(out_shp, crs='EPSG:5071')
 
 
-def write_response_histogram(csv, attrs, out_fig):
+def write_response_histogram(csv, areas, out_fig):
     first = True
     bnames = [x for x in os.listdir(csv) if x.strip('.csv')]
     csv = [os.path.join(csv, x) for x in bnames]
-    attrs = [os.path.join(attrs, x) for x in os.listdir(attrs) if x in bnames]
+
+    with open(areas, 'r') as f_obj:
+        areas = json.load(f_obj)
+        areas = pd.Series(areas)
+
     df = None
 
     met_periods = list(range(1, 13)) + [18, 24, 30, 36]
     use_ints = list(range(4, 11))
     use_periods = [datetime(2001, m, 1).strftime('%b') for m in use_ints]
 
-    for m, f in zip(attrs, csv):
+    for f in csv:
+
         print(f)
         c = pd.read_csv(f, index_col=0)
-
         if first:
             df = c.copy()
             first = False
@@ -94,26 +98,37 @@ def write_response_histogram(csv, attrs, out_fig):
             df = pd.concat([df, c])
 
     cols = [c for c in df.columns if c.startswith('met')]
+    resp = df[cols].max(axis=1)
     df = df[cols].idxmax(axis=1)
     df = pd.DataFrame(df, columns=['str'])
     df['met'] = df['str'].apply(lambda x: int(x.split('_')[0].strip('met')))
     df['ag'] = df['str'].apply(lambda x: int(x.split('_')[1].strip('ag')))
     df['fr'] = df['str'].apply(lambda x: int(x.split('_')[2].strip('fr')))
+    match = [k for k, v in areas.items() if k in df.index]
+    df.loc[match, 'Area'] = areas.loc[match]
+    df['Response'] = resp
 
-    fig, ax = plt.subplots(3, 1, figsize=(12, 8), dpi=80)
+    palette = sns.color_palette("rocket", as_cmap=True)
 
-    sns.countplot(data=df, ax=ax[0], x='met', palette=['blue'])
+    fig, ax = plt.subplots(4, 1, figsize=(12, 8), dpi=80)
+
+    sns.countplot(data=df, ax=ax[0], x='met', color=palette.colors[1])
     ax[0].set(xlabel='Standardised Precipitation-Evapotranspiration Index, Time Scale (Months)')
     ax[0].set_ylabel(None)
 
-    sns.countplot(data=df, ax=ax[1], x='ag', palette=['red'])
+    sns.countplot(data=df, ax=ax[1], x='ag', color=palette.colors[86])
     ax[1].set(xlabel='Standardized Irrigation Management Index Time Scale (Months)')
     ax[1].set_ylabel('Fields Count')
 
-    sns.countplot(data=df, ax=ax[2], x='fr', palette=['green'])
+    sns.countplot(data=df, ax=ax[2], x='fr', color=palette.colors[172])
     ax[2].set(xlabel='From Month')
     ax[2].set_ylabel(None)
     ax[2].set_xticklabels(use_periods)
+
+    sns.histplot(data=df, ax=ax[3], x='Area', y='Response', color=palette.colors[172], bins=15,
+                 binrange=(0, 1.0), cbar=True, cbar_kws=dict(shrink=.75, label='Fields Count', location='top'))
+    ax[3].set(xlabel='Field Area km$^2$')
+    ax[3].set_ylabel('Field Response')
 
     plt.tight_layout()
     # plt.show()
@@ -126,8 +141,8 @@ if __name__ == '__main__':
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
     in_ = os.path.join(root, 'field_pts/indices/simi')
+    fields_area = os.path.join(root, 'tables/cdl/fields_area.json')
     meta = os.path.join(root, 'field_pts/usbr_attr')
-
     out_ = os.path.join(root, 'figures', 'partitions', 'fields_response_hist.png')
     s = os.path.join(root, 'shapefiles', 'openet_field_centr_irr_gt19',
                      'state_openet_points/field_null_attr_13FEB2023.shp')
@@ -135,7 +150,7 @@ if __name__ == '__main__':
     oshp = os.path.join(root, 'shapefiles/field_pts/response.shp')
     ojs_ = os.path.join(root, 'field_pts/indices/response_json')
 
-    # write_response_shapefile(in_, meta, s, oshp, None)
+    write_response_shapefile(in_, meta, s, oshp, None)
     # write_response_histogram(in_, meta, out_)
 
     park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
@@ -143,5 +158,5 @@ if __name__ == '__main__':
     csv_ = os.path.join(park, 'fields_shp')
     ishp_ = os.path.join(park, 'fields_shp', 'park_select.shp')
     oshp_ = os.path.join(park, 'fields_shp', 'park_response.shp')
-    write_response_shapefile(indices_, csv_, ishp_, oshp_, o_json=None)
+    # write_response_shapefile(indices_, csv_, ishp_, oshp_, o_json=None)
 # ========================= EOF ====================================================================

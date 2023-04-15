@@ -4,9 +4,8 @@ from pprint import pprint
 from calendar import monthrange
 from subprocess import check_call, Popen, PIPE
 
-import ee
-
-from call_ee import is_authorized, BASIN_STATES
+from ee_utils import is_authorized
+BASIN_STATES = ['CA', 'CO', 'ID', 'MT', 'NM', 'NV', 'OR', 'UT', 'WA', 'WY']
 
 home = os.path.expanduser('~')
 conda = os.path.join(home, 'miniconda3', 'envs')
@@ -164,6 +163,23 @@ def set_time_metadata(asset):
     check_call(cmd)
 
 
+def set_annual_time_metadata(asset):
+
+    splt = os.path.basename(asset).split('_')
+    yr = int(splt[-3])
+
+    cmd = ['{}'.format(EE), 'asset', 'set',
+           '{}'.format('--time_start'), '{}-04-01T00:00:00'.format(yr), asset]
+    print(' '.join(cmd))
+    check_call(cmd)
+
+    cmd = ['{}'.format(EE), 'asset', 'set',
+           '{}'.format('--time_end'), '{}-10-31T00:00:00'.format(yr), asset]
+
+    print(' '.join(cmd))
+    check_call(cmd)
+
+
 if __name__ == '__main__':
     is_authorized()
     _bucket = 'gs://wudr'
@@ -171,8 +187,16 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    shp_ = '/media/nvm/field_pts/fields'
-    for s in BASIN_STATES:
-        push_shapes_to_asset(shp_, s, _bucket)
+    ras_ = '/media/nvm/ept/full_stack_pred_gs'
+    assets = 'users/dgketchum/expansion/ept_gs'
+    glb = 'ept_image_full_stack'
+    # push_images_to_asset(ras_, assets, glb, _bucket)
+
+    existing = list_assets('projects/earthengine-legacy/assets/users/dgketchum/expansion/ept_gs')
+    existing.reverse()
+    for i in existing:
+        set_metadata(i, 'ept')
+        set_annual_time_metadata(i)
+
 
 # ========================= EOF ====================================================================

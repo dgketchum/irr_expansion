@@ -7,10 +7,10 @@ from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 
-from concatenate import BASIN_STATES
+from field_points.crop_codes import BASIN_STATES
 from climate_indices import compute, indices
 from transition_modeling.transition_data import KEYS, OLD_KEYS
-from crops import cdl_key
+from field_points.crops import cdl_key
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
@@ -318,7 +318,7 @@ def cdl_spei(npy, cdl_timescale, out_dir):
     print('writing ', out_path)
 
 
-def cdl_et(npy, out_js):
+def cdl_et(npy, out_js, parameter):
     cdl_ = cdl_key()
     COLS.append('cdl')
     dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2008, 2022) for m in range(1, 13)]
@@ -357,7 +357,7 @@ def cdl_et(npy, out_js):
 
                 classific = data[:, -len(dt_range):, -1]
                 data = data[:, -len(dt_range):, :]
-                cc = data[:, :, COLS.index('cc')]
+                cc = data[:, :, COLS.index(parameter)]
 
                 stack = np.stack([cc, months, classific])
                 d = stack[:, stack[1] == 1]
@@ -397,6 +397,7 @@ if __name__ == '__main__':
     spei = os.path.join(root, 'field_pts/fields_data/cdl_spei')
     # cdl_spei(indir, t_scales, spei)
 
-    ccons = os.path.join(root, 'field_pts/fields_data/cdl_cc.json')
-    cdl_et(indir, ccons)
+    param = 'cc'
+    ccons = os.path.join(root, 'field_pts/fields_data/cdl_{}.json'.format(param))
+    cdl_et(indir, ccons, param)
 # ========================= EOF ====================================================================

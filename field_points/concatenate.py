@@ -5,6 +5,9 @@ import numpy as np
 import pandas as pd
 
 from gridded_data import BASIN_STATES
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
 
@@ -178,9 +181,9 @@ if __name__ == '__main__':
     # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
     #                        file_check=False, itype_dir=itype_data)
 
-    # fpd = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
-    # concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
-    #                        file_check=False, cdl_dir=cdl_data)
+    fpd = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
+    concatenate_field_data(csv_, meta_, fpd, glob='ietr_fields_16FEB2023',
+                           file_check=False, cdl_dir=cdl_data)
 
     park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
     csv_ = os.path.join(park, 'csv')

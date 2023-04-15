@@ -185,6 +185,14 @@ def get_cdl(yr):
     return cultivated, crop, simple_crop
 
 
+def is_authorized():
+    try:
+        ee.Initialize()
+        print('Authorized')
+    except Exception as e:
+        print('You are not authorized: {}'.format(e))
+
+
 if __name__ == '__main__':
     pass
 # ========================= EOF ====================================================================

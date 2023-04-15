@@ -89,7 +89,7 @@ def cdl_area_studywide_timeseries(cdl_dir, area_json, out_json):
         json.dump(dct, fp, indent=4)
 
 
-def cdl_area_huc_timeseries(cdl_dir, area_json, huc, out_json):
+def cdl_area_basin_timeseries(cdl_dir, area_json, huc, out_json, simplify=False, basin_type='huc'):
     with open(area_json, 'r') as _file:
         areas = json.load(_file)
 
@@ -97,6 +97,7 @@ def cdl_area_huc_timeseries(cdl_dir, area_json, huc, out_json):
     huc = pd.read_csv(huc, index_col='OPENET_ID')
     match = [i for i in huc.index if i in area.index]
     area.loc[match, 'huc'] = huc.loc[match, 'huc8']
+    area.loc[match, 'basin'] = huc.loc[match, 'basin']
     area.dropna(inplace=True, axis=0)
 
     l = [os.path.join(cdl_dir, x) for x in os.listdir(cdl_dir)]
@@ -116,13 +117,27 @@ def cdl_area_huc_timeseries(cdl_dir, area_json, huc, out_json):
         area[c] = area['area']
     area.drop(columns=['area'], inplace=True)
 
+    # df.dropna(inplace=True, axis=0)
+    if simplify:
+        remap = cdl_key()
+        for c in df.columns:
+            df[c] = df[c].apply(lambda x: remap[x][1] if np.isfinite(x) else np.nan)
+        keys_ = list(np.unique(df.values))
+    else:
+        keys_ = KEYS
+
     dct = {}
-    for c in KEYS:
+    for c in keys_:
         a_vals, c_vals = area[df.columns].values.copy(), df.values.copy()
         a_vals[c_vals != c] = np.nan
         hdf = pd.DataFrame(data=a_vals, columns=df.columns, index=df.index)
-        hdf['huc'] = area['huc'].values.astype(int)
-        hdf = hdf.groupby('huc').sum()
+
+        if basin_type == 'huc':
+            hdf[basin_type] = area[basin_type].values.astype(int)
+        else:
+            hdf[basin_type] = area[basin_type]
+
+        hdf = hdf.groupby(basin_type).sum()
         top = hdf.mean(axis=1).sort_values().index[-20:]
         hdf = hdf.loc[top]
         hdf[hdf.values == 0.0] = np.nan
@@ -144,9 +159,8 @@ if __name__ == '__main__':
     cdl_area_ = os.path.join(root, 'tables/cdl/cdl_area_timeseries.json')
     # cdl_area_studywide_timeseries(crops, areas_, cdl_area_)
 
-    huc = os.path.join(root, 'field_pts/fields_shp_huc/centroids_huc.csv')
+    huc = os.path.join(root, 'field_pts/fields_shp_huc/centroids_huc_basin.csv')
     cdl_area_ = os.path.join(root, 'tables/cdl/cdl_huc_area_timeseries.json')
-    cdl_area_huc_timeseries(crops, areas_, huc, cdl_area_)
-
+    cdl_area_basin_timeseries(crops, areas_, huc, cdl_area_, simplify=True, basin_type='basin')
 
 # ========================= EOF ====================================================================

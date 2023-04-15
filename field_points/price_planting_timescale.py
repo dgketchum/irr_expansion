@@ -36,6 +36,8 @@ def planting_area_prediction(price_csv, area_js, keys, files_js, timescales, mod
     lags = {}
 
     for fcode, tcode in keys:
+        if mode == 'uv' and fcode != tcode:
+            continue
         area = areas_[tcode]
         tcrop = cdl[tcode][0]
         fcrop = cdl[fcode][0]
@@ -72,6 +74,7 @@ def planting_area_prediction(price_csv, area_js, keys, files_js, timescales, mod
                 rmse = mean_squared_error(a, pred, squared=False)
 
                 if rmse < rmse_min:
+                    # print(rmse)
                     rmse_min, opt_flag, opt_tlag = rmse, f_lag, t_lag
 
                 if mode == 'uv':
@@ -87,19 +90,26 @@ def planting_area_prediction(price_csv, area_js, keys, files_js, timescales, mod
 
         lags['{}_{}'.format(fcode, tcode)] = {'flag': opt_flag, 'tlag': opt_tlag, 'rmse': rmse_min}
 
-    if mode == 'mv':
-        with open(files_js, 'w') as fp:
-            json.dump(code_files, fp, indent=4)
+    with open(files_js, 'w') as fp:
+        json.dump(code_files, fp, indent=4)
 
-        with open(timescales, 'w') as fp:
-            json.dump(lags, fp, indent=4)
+    with open(timescales, 'w') as fp:
+        json.dump(lags, fp, indent=4)
 
 
 if __name__ == '__main__':
-    deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'
-    files_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/price_files.json'
-    cdl_area_ = '/media/research/IrrigationGIS/expansion/tables/cdl/cdl_area_timeseries.json'
-    transition_keys = '/media/research/IrrigationGIS/expansion/analysis/transition/keys.json'
-    time_scales = '/media/research/IrrigationGIS/expansion/analysis/transition/time_scales.json'
-    planting_area_prediction(deflated, cdl_area_, transition_keys, files_, mode='mv', timescales=time_scales)
+    root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
+    if not os.path.exists(root):
+        root = os.path.join('/home', 'dgketchum', 'data', 'IrrigationGIS', 'expansion')
+
+    mode_ = 'uv'
+    deflated = os.path.join(root, 'tables/crop_value/deflated')
+    files_ = os.path.join(root, 'tables/crop_value/price_files.json')
+    cdl_area_ = os.path.join(root, 'tables/cdl/cdl_area_timeseries.json')
+
+    transition_keys = os.path.join(root, 'analysis/transition/keys.json')
+    time_scales = os.path.join(root, 'analysis/transition/{}_price/time_scales.json'.format(mode_))
+
+    planting_area_prediction(deflated, cdl_area_, transition_keys, files_,
+                             mode=mode_, timescales=time_scales)
 # ========================= EOF ====================================================================

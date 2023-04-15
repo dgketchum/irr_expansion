@@ -40,7 +40,7 @@ sns.set_style("dark", {'axes.linewidth': 0.5})
 def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basins', weighted=False):
     met_periods = list(range(1, 13)) + [18, 24, 30, 36]
     target_timescales = []
-    for month in range(5, 11):
+    for month in range(8, 9):
         use_periods = list(range(1, month - 2))
 
         data = os.path.join(data_dir, '{}_{}.json'.format(desc_str, month))
@@ -85,16 +85,23 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
 
             grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid).values
 
-            ax = sns.heatmap(grid, square=True, annot=True, cmap='magma', cbar=False,
-                             xticklabels=met_periods, yticklabels=use_periods)
+            ax = sns.heatmap(grid, square=True, annot=True, cmap='rocket', cbar=False,
+                             xticklabels=met_periods, yticklabels=use_periods, fmt='.2f')
 
             y, x = np.unravel_index(np.argmax(np.abs(grid), axis=None), grid.shape)
             ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
-            plt.xlabel('{} - Months'.format(met))
-            plt.ylabel('{}\nMonths'.format(use))
+
+            if met == 'SPEI':
+                xaxis_str = 'Standardized Precipitation and Evaporation Index\nMonths'
+            else:
+                xaxis_str = 'Standardized Precipitation Index'
+
+            yaxis_str = 'Standardized Irrigation Managment Index\nMonths'
+
+            plt.xlabel(xaxis_str)
+            plt.ylabel(None)
             plt.yticks(rotation=0)
             ax.tick_params(axis='y', which='major', pad=30)
-            # plt.subplots_adjust(left=0.5)
             plt.tight_layout()
             fig_file = os.path.join(fig_d, param, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
             plt.savefig(fig_file, bbox_inches='tight')
@@ -151,7 +158,7 @@ def fields_heatmap(csv, attrs, fig_d):
                         grid[i, j] = np.mean(slice_)
 
                 grid = pd.DataFrame(index=use_periods, columns=met_periods, data=grid).values
-                ax = sns.heatmap(grid, square=True, annot=True, cmap='magma', fmt='.3g')
+                ax = sns.heatmap(grid, square=True, annot=True, cmap='rocket', fmt='.3g')
                 y, x = np.unravel_index(np.argmax(np.abs(grid), axis=None), grid.shape)
                 ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
                 plt.xlabel('{} - Months'.format(met))

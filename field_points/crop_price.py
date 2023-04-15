@@ -242,7 +242,7 @@ def normalized_price_data(nominal, ppi, deflated):
         c = pd.read_csv(csv, infer_datetime_format=True, parse_dates=True, index_col=0)
 
         if crop in df.columns:
-            c = c.div(df[crop].div(100, axis=0), axis=0)
+            c = c.div(df[crop], axis=0)
         else:
             c = c.div(df['Farm Products'].div(100, axis=0), axis=0)
 
@@ -262,15 +262,15 @@ if __name__ == '__main__':
 
     key_ = '/home/dgketchum/quickstats_token.json'
     nass_price_monthly = '/media/research/IrrigationGIS/expansion/analysis/nass_price_monthly.json'
-    get_monthly_price_timeseries(key_, nass_price_monthly)
+    # get_monthly_price_timeseries(key_, nass_price_monthly)
 
     price_data = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data'
     map_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/nass_data/values.csv'
     nass_price_annual = '/media/research/IrrigationGIS/expansion/analysis/nass_price_annual.json'
-    get_annual_price_timeseries(price_data, map_, nass_price_annual, key_)
+    # get_annual_price_timeseries(price_data, map_, nass_price_annual, key_)
 
     nominal_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/nominal'
-    nominal_price_data(nass_price_monthly, nass_price_annual, nominal_)
+    # nominal_price_data(nass_price_monthly, nass_price_annual, nominal_)
 
     ppi_ = '/media/research/IrrigationGIS/expansion/tables/crop_value/ppi/ppi_cdl_monthly.csv'
     deflated = '/media/research/IrrigationGIS/expansion/tables/crop_value/deflated'

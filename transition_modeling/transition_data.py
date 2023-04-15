@@ -12,6 +12,8 @@ from field_points.crop_codes import cdl_key
 DEFAULTS = {'draws': 1000,
             'tune': 1000}
 
+OLD_KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53, 56, 57, 58, 59, 66, 68, 69, 71, 77]
+
 KEYS = [1, 12, 21, 23, 24, 28, 36, 37, 41, 42, 43, 49, 53]
 
 
@@ -49,6 +51,7 @@ def data_to_json(climate, from_price, to_price, label_file, samples):
 
     with open(label_file, 'w') as fp:
         json.dump(dct, fp, indent=4)
+        print(label_file)
 
 
 def load_data(climate, from_price, to_price, from_crop, n_samples=None):
