@@ -143,15 +143,15 @@ if __name__ == '__main__':
     in_ = os.path.join(root, 'field_pts/indices/simi')
     fields_area = os.path.join(root, 'tables/cdl/fields_area.json')
     meta = os.path.join(root, 'field_pts/usbr_attr')
-    out_ = os.path.join(root, 'figures', 'partitions', 'fields_response_hist.png')
     s = os.path.join(root, 'shapefiles', 'openet_field_centr_irr_gt19',
                      'state_openet_points/field_null_attr_13FEB2023.shp')
 
     oshp = os.path.join(root, 'shapefiles/field_pts/response.shp')
     ojs_ = os.path.join(root, 'field_pts/indices/response_json')
 
-    write_response_shapefile(in_, meta, s, oshp, None)
-    # write_response_histogram(in_, meta, out_)
+    # write_response_shapefile(in_, meta, s, oshp, None)
+    out_ = os.path.join(root, 'figures', 'field_pts', 'fields_response_hist.png')
+    write_response_histogram(in_, meta, out_)
 
     park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
     indices_ = os.path.join(park, 'indices', 'simi')

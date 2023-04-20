@@ -168,12 +168,12 @@ if __name__ == '__main__':
     param = 'usbr'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    # partition_usbr_response(part_, out_)
+    partition_usbr_response(part_, out_)
 
     param = 'cdl'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    # partition_cdl_response(part_, out_)
+    partition_cdl_response(part_, out_)
 
     param = 'itype'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
