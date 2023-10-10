@@ -79,7 +79,7 @@ def write_response_histogram(csv, areas, out_fig):
 
     with open(areas, 'r') as f_obj:
         areas = json.load(f_obj)
-        areas = pd.Series(areas)
+    areas = pd.Series(areas)
 
     df = None
 
@@ -110,7 +110,7 @@ def write_response_histogram(csv, areas, out_fig):
 
     palette = sns.color_palette("rocket", as_cmap=True)
 
-    fig, ax = plt.subplots(4, 1, figsize=(12, 8), dpi=80)
+    fig, ax = plt.subplots(3, 1, figsize=(12, 8), dpi=80)
 
     sns.countplot(data=df, ax=ax[0], x='met', color=palette.colors[1])
     ax[0].set(xlabel='Standardised Precipitation-Evapotranspiration Index, Time Scale (Months)')
@@ -124,11 +124,6 @@ def write_response_histogram(csv, areas, out_fig):
     ax[2].set(xlabel='From Month')
     ax[2].set_ylabel(None)
     ax[2].set_xticklabels(use_periods)
-
-    sns.histplot(data=df, ax=ax[3], x='Area', y='Response', color=palette.colors[172], bins=15,
-                 binrange=(0, 1.0), cbar=True, cbar_kws=dict(shrink=.75, label='Fields Count', location='top'))
-    ax[3].set(xlabel='Field Area km$^2$')
-    ax[3].set_ylabel('Field Response')
 
     plt.tight_layout()
     # plt.show()
@@ -150,8 +145,9 @@ if __name__ == '__main__':
     ojs_ = os.path.join(root, 'field_pts/indices/response_json')
 
     # write_response_shapefile(in_, meta, s, oshp, None)
-    out_ = os.path.join(root, 'figures', 'field_pts', 'fields_response_hist.png')
-    write_response_histogram(in_, meta, out_)
+
+    out_ = os.path.join(root, 'figures', 'field_pts', 'fields_response_hist_14JUN2023.png')
+    write_response_histogram(in_, fields_area, out_)
 
     park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
     indices_ = os.path.join(park, 'indices', 'simi')

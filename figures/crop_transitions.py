@@ -108,7 +108,7 @@ def transition_probability(cdl_data, cdl_acc, out_matrix):
 
         fig = plt.figure(figsize=(16, 10))
         ax = sns.heatmap(prob, square=False, annot=True, cmap=cmap, cbar=False,
-                         xticklabels=classes, yticklabels=classes, fmt='.2f')
+                         xticklabels=classes, yticklabels=classes, fmt='.2f', annot_kws={'fontsize': 16})
         if k == 'All':
             ax.add_patch(Rectangle((2, 8), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
         ax2 = ax.twinx()
@@ -123,6 +123,15 @@ def transition_probability(cdl_data, cdl_acc, out_matrix):
         ax2.set_yticklabels(ytick_labels)
         ax2.set_yticks(ax.get_yticks())
         ax2.tick_params(axis='y', which='both', pad=10)
+
+        for tick in ax.get_xticklabels():
+            tick.set_fontsize(16)
+
+        for tick in ax2.get_yticklabels():
+            tick.set_fontsize(16)
+
+        for tick in ax.get_yticklabels():
+            tick.set_fontsize(16)
 
         if k == 'All':
             plt.suptitle('Crop Transition Probabilities')
@@ -160,6 +169,7 @@ def transition_et(cdl_data, cdl_acc, et_data, out_matrix):
 
     cdl = cdl_key()
     set_, classes = KEYS, [cdl[c][0] for c in SORTED_KEYS]
+
     et['Crop'] = classes
     et = et[['Crop', 'IWU']]
     et['sd'] = et['IWU'] * 0.33
@@ -195,15 +205,17 @@ def transition_et(cdl_data, cdl_acc, et_data, out_matrix):
 
         sns.barplot(x='Crop', y='IWU', data=et, yerr=et['sd'], ec='black', color='white', errorbar=('ci', 95),
                     orient='v', width=0.9, ax=ax1)
-        ax1.set(xlabel='Mean Crop Irrigation Water Use')
-        ax1.set(ylabel='[m yr$^{-1}$]')
+        ax1.set_xlabel('Mean Crop Irrigation Water Use', fontsize=16)
+        ax1.set_ylabel('[m yr$^{-1}$]', fontsize=16)
         ax1.set_xticks([])
         ax1.set_xticklabels([])
-
         ax1.legend([], [], frameon=False)
+        for tick in ax1.get_yticklabels():
+            tick.set_fontsize(16)
 
+        classes[3] = 'Other Hay'
         sns.heatmap(prob, square=False, annot=True, cmap=cmap, cbar=False,
-                    xticklabels=classes, yticklabels=classes, fmt='.2f', ax=ax2)
+                    xticklabels=classes, yticklabels=classes, fmt='.2f', ax=ax2, annot_kws={'fontsize': 16})
         ax3 = ax2.twinx()
         ax3.set_ylim(ax2.get_ylim())
         ncounts = [dct['from_ct'][key] for key in SORTED_KEYS]
@@ -216,6 +228,17 @@ def transition_et(cdl_data, cdl_acc, et_data, out_matrix):
         ax3.set_yticklabels(ytick_labels)
         ax3.set_yticks(ax2.get_yticks())
         ax3.tick_params(axis='y', which='both', pad=10)
+
+        for tick in ax2.get_xticklabels():
+            tick.set_fontsize(16)
+        ax2.set_xticklabels(ax2.get_xticklabels(), rotation=90)
+
+        for tick in ax2.get_yticklabels():
+            tick.set_fontsize(16)
+
+        for tick in ax3.get_yticklabels():
+            tick.set_fontsize(16)
+
         # plt.suptitle('Crop Transition Probabilities Difference\nDry Minus Wet'.format(k))
         fig_file = os.path.join(out_matrix, 'transition_cc_{}.png'.format(k))
         plt.tight_layout()

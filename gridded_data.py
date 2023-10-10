@@ -323,8 +323,13 @@ def ee_task_start(task, n=6):
 if __name__ == '__main__':
     bucket = 'wudr'
     table_ = 'users/dgketchum/expansion/fields'
-    extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields', join_col='OPENET_ID', geo_type='fields',
-                      volumes=True, masks=True)
+    # extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields',
+    #                   join_col='OPENET_ID', geo_type='fields',
+    #                   volumes=True, masks=True)
     # get_field_itype(table_, bucket, 2021, 'openet_itype')
+
+    extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields',
+                      join_col='OPENET_ID', geo_type='huc',
+                      volumes=True, masks=True)
 
 # ========================= EOF ================================================================================

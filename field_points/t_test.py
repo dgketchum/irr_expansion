@@ -67,8 +67,8 @@ def t_test_itype_partion(part_dir):
     dct = {}
     for _type in df['itype'].unique():
         s1 = df.loc[(df['Class'] == 'Normal') & (df['itype'] == _type), 'SIMI']
-        s2 = df.loc[(df['Class'] == 'Wet') & (df['itype'] == _type), 'SIMI']
-        print(itype[_type], 'Normal', s1.mean(), 'Wet', s2.mean(), '{:.3f}'.format(s2.mean() - s1.mean()))
+        s2 = df.loc[(df['Class'] == 'Dry') & (df['itype'] == _type), 'SIMI']
+        print(itype[_type], 'Normal', s1.mean(), 'Dry', s2.mean(), '{:.3f}'.format(s2.mean() - s1.mean()))
         t, p = ttest_ind(s1, s2)
         dct[_type] = {'t': t, 'p': p, 'itype': itype[_type]}
 
@@ -121,6 +121,5 @@ if __name__ == '__main__':
 
     param = 'usbr'
     part_ = '/media/nvm/field_pts/fields_data/partitioned_npy/{}'.format(param)
-    t_test_usbr_partion(part_)
-
+    # t_test_usbr_partion(part_)
 # ========================= EOF ====================================================================

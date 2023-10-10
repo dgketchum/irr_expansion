@@ -6,6 +6,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta as reldt
+import matplotlib.pyplot as plt
 
 from field_points.crop_codes import cdl_key
 
@@ -164,6 +165,26 @@ def crop_transitions(cdl_npy, price_files, response_timescale, out_matrix):
     pass
 
 
+def climate_price_correlation(sample_data):
+    with open(sample_data, 'r') as fp:
+        data = json.load(fp)
+
+    cdl = cdl_key()
+
+    for fc, d in data.items():
+        crop = cdl[int(fc)][0]
+        inv_dict = {v: k for k, v in d['label_map'].items()}
+        x = np.array(d['x'])
+        y = [1 if int(inv_dict[e]) == int(fc) else 0 for e in d['y']]
+        mask = [i for i, e in enumerate(y) if e == 1]
+        x = x[mask, :]
+        climate, price = x[:, 0], x[:, 1]
+        corr = np.corrcoef(climate, price)[0, 1]
+        plt.scatter(climate, price)
+        plt.show()
+        print('Correlation for {}: {:.3f}'.format(crop, corr))
+
+
 if __name__ == '__main__':
     root = os.path.join('/media', 'research', 'IrrigationGIS', 'expansion')
     if not os.path.exists(root):
@@ -175,5 +196,12 @@ if __name__ == '__main__':
     met_cdl = '/media/nvm/field_pts/fields_data/cdl_spei/cdl_spei.npy'
     files_ = os.path.join(root, 'tables/crop_value/price_files.json')
     response_timescale_ = os.path.join(root, 'analysis/transition/{}_price/time_scales.json'.format(mode_))
-    crop_transitions(met_cdl, files_, response_timescale_, transitions_)
+    # crop_transitions(met_cdl, files_, response_timescale_, transitions_)
+
+    sample = 50000
+    glb = 'sample_{}'.format(sample)
+    transitions_ = os.path.join(root, 'analysis/transition')
+    sample_data_ = os.path.join(transitions_, 'sample_data', '{}.json'.format(glb))
+    climate_price_correlation(sample_data_)
+
 # ========================= EOF ====================================================================
