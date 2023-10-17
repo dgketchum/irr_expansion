@@ -20,9 +20,6 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
         out_json = os.path.join(out_meta, '{}_{}.json'.format(desc_str, month_end))
         for sid, sdata in stations.items():
 
-            if sid not in ['13269000', '13213100']:
-                continue
-
             print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
 
             _file = os.path.join(gridded_data, '{}.csv'.format(sid))
@@ -79,13 +76,6 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
                                                      periodicity=compute.Periodicity.monthly)
 
             for x in range(1, 8):
-                df['SCUI_{}'.format(x)] = indices.spi(df['cc'].values,
-                                                      scale=x,
-                                                      distribution=indices.Distribution.gamma,
-                                                      data_start_year=1984,
-                                                      calibration_year_initial=1984,
-                                                      calibration_year_final=2021,
-                                                      periodicity=compute.Periodicity.monthly)
 
                 df['SIMI_{}'.format(x)] = indices.spi(df['kc'].values,
                                                       scale=x,
@@ -94,21 +84,13 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
                                                       calibration_year_initial=1984,
                                                       calibration_year_final=2021,
                                                       periodicity=compute.Periodicity.monthly)
-                ssfi_key = 'SFI_{}'.format(x)
-                if ssfi_key not in df.columns:
-                    df[ssfi_key] = indices.spi(df['q'].values,
-                                               scale=x,
-                                               distribution=indices.Distribution.gamma,
-                                               data_start_year=1984,
-                                               calibration_year_initial=1984,
-                                               calibration_year_final=2021,
-                                               periodicity=compute.Periodicity.monthly)
 
             if plot_dir:
                 for met_param in ['SPI_12', 'SPEI_12']:
                     use_timescale = 3
                     fig_file = os.path.join(plot_dir, '{}_{}.png'.format(sid, met_param))
-                    plot_indices_panel(df, met_param, use_timescale, month_end, fig_file, title_str=sdata['STANAME'])
+                    plot_indices_panel(df, met_param, use_timescale, month_end,
+                                       fig_file, title_str=sdata['STANAME'])
 
             elif plot_dir and month_end == 10:
                 for met_param in ['SPI_12', 'SPEI_12']:
@@ -121,7 +103,7 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
             df = df.loc['1990-01-01':]
             pdf = df.loc[[x for x in df.index if x.month == month_end]]
             dct[sid] = {'irr_area': np.nanmean(df['irr'].values) / 1e6}
-            for met, use in combos:
+            for met, use in combos[-1:]:
                 rmax = 0.0
                 corr_ = [met, use, rmax]
                 for met_ts in met_periods:
@@ -167,7 +149,7 @@ if __name__ == '__main__':
     data_ = os.path.join(root, 'metadata', 'irrigated_gage_metadata.json')
     out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
     figs = os.path.join(root, 'figures', 'panel', 'ietr_huc8_29SEP2023')
-    write_indices(data_, merged, out_js, plot_dir=figs, desc_str='basins')
+    write_indices(data_, merged, out_js, plot_dir=None, desc_str='basins_SFI_SIMI')
 
 
 # ========================= EOF ====================================================================
