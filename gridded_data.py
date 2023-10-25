@@ -6,6 +6,7 @@ from calendar import monthrange
 
 import numpy as np
 import ee
+import geopandas as gpd
 
 from utils.ee_utils import get_cdl
 
@@ -126,7 +127,7 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
     fc = fc.randomColumn('rand', seed=1234)
 
     if features:
-        fc = fc.filter(ee.Filter.inList('STAID', features))
+        fc = fc.filter(ee.Filter.inList(join_col, features))
 
     cmb_clip = ee.FeatureCollection(CMBRB_CLIP)
     umrb_clip = ee.FeatureCollection(UMRB_CLIP)
@@ -142,7 +143,7 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
     irr_min_yr_mask = remap.sum().gte(min_years)
 
     for yr in years:
-        for month in range(1, 13):
+        for month in range(6, 7):
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -229,6 +230,8 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
                 data = bands.reduceRegions(collection=fc,
                                            reducer=ee.Reducer.sum(),
                                            scale=30)
+
+                # debug = data.filterMetadata(join_col, 'equals', '14359000').first().getInfo()
 
                 out_desc = '{}_{}_{}'.format(description, yr, month)
                 task = ee.batch.Export.table.toCloudStorage(
@@ -322,14 +325,25 @@ def ee_task_start(task, n=6):
 
 if __name__ == '__main__':
     bucket = 'wudr'
-    table_ = 'users/dgketchum/expansion/fields'
-    # extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields',
-    #                   join_col='OPENET_ID', geo_type='fields',
+    table_ = 'users/dgketchum/hydrography/huc8'
+
+    shp = gpd.read_file('/media/research/IrrigationGIS/expansion/shapefiles/'
+                        'study_area/study_area_huc8_ucrb_wKlamath.shp')
+    feats = list(shp['huc8'])
+
+    # extract_area_data(table_, bucket, list(range(2009, 2022)), 'huc8',
+    #                   join_col='huc8', geo_type='huc', features=feats,
     #                   volumes=True, masks=True)
+
+    table_ = 'users/dgketchum/gages/expansion_gage_basins'
+    extract_area_data(table_, bucket, list(range(2006, 2007)), 'basins',
+                      join_col='GAGE_ID', geo_type='basin',
+                      volumes=True, masks=True)
+
     # get_field_itype(table_, bucket, 2021, 'openet_itype')
 
-    extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields',
-                      join_col='OPENET_ID', geo_type='huc',
-                      volumes=True, masks=True)
+    # extract_area_data(table_, bucket, list(range(1987, 2022)), 'park_fields',
+    #                   join_col='OPENET_ID', geo_type='huc',
+    #                   volumes=True, masks=True)
 
 # ========================= EOF ================================================================================
