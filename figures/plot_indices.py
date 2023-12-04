@@ -10,7 +10,7 @@ box_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0
 def plot_indices_panel(df, end_mo, fig_, title_str=None):
     df = df.loc['1987-01-01':]
     oct_df = df.loc[[x for x in df.index if x.month == end_mo]]
-    plt.figure(figsize=(10, 12))
+    plt.figure(figsize=(8, 12))
 
     ax1 = plt.subplot(4, 1, 1)
     ax1.title.set_text('Surface Water Drought Index')
@@ -52,6 +52,7 @@ def plot_indices_panel(df, end_mo, fig_, title_str=None):
     plt.suptitle(title_str)
     plt.tight_layout()
     plt.savefig(fig_)
+    # plt.show()
     # print(os.path.basename(fig_))
     pass
 

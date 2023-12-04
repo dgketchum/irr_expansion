@@ -12,15 +12,24 @@ from figures.plot_indices import plot_indices_panel, plot_indices_panel_nonstrea
 
 
 def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin'):
+
     with open(meta, 'r') as f_obj:
         stations = json.load(f_obj)
 
     for month_end in range(5, 11):
         dct = {}
         out_json = os.path.join(out_meta, '{}_{}.json'.format(desc_str, month_end))
+
         for sid, sdata in stations.items():
 
-            print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
+            if sid != '06192500':
+                # Gallatin Figure
+                continue
+
+            if desc_str == 'basin':
+                print('\n{} {}: {}'.format(month_end, sid, sdata['STANAME']))
+            else:
+                print('\n{} {}: {}'.format(month_end, sid, sdata))
 
             _file = os.path.join(gridded_data, '{}.csv'.format(sid))
             try:
@@ -33,20 +42,26 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
             df['etr'] = (df['etr'] - df['etr'].min()) / (df['etr'].max() - df['etr'].min()) + 0.001
             df['kc'] = df['et'] / df['ietr']
 
-            df = df[['q', 'cc', 'ppt', 'etr', 'kc', 'irr']]
+            if desc_str == 'basin':
+                df = df[['q', 'cc', 'ppt', 'etr', 'kc', 'irr']]
+            else:
+                df = df[['cc', 'ppt', 'etr', 'kc', 'irr']]
+
             df['cwb'] = df['ppt'] - df['etr']
 
             summary = df.fillna(0.0)
             summary = summary.resample('A').agg(pd.DataFrame.sum, skipna=False)
             summary = summary.loc['1987-01-01': '2021-12-31']
             summary /= 1e9
-            plt_cols = ['cc', 'q']
-            summary = summary[plt_cols]
-            cc = summary.cc.values
-            q = summary.q.values
-            ratio = (cc / q).mean()
-            if ratio < 0.1:
-                continue
+
+            if desc_str == 'basin':
+                plt_cols = ['cc', 'q']
+                summary = summary[plt_cols]
+                cc = summary.cc.values
+                q = summary.q.values
+                ratio = (cc / q).mean()
+                if ratio < 0.2:
+                    print('{} {} has low use-to-flow ratio'.format(sid, sdata['STANAME']))
 
             met_periods = list(range(1, 13)) + [18, 24, 30, 36]
 
@@ -67,13 +82,14 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
                                                        calibration_year_final=2021,
                                                        periodicity=compute.Periodicity.monthly)
 
-                df['SFI_{}'.format(x)] = indices.spi(df['q'].values,
-                                                     scale=x,
-                                                     distribution=indices.Distribution.gamma,
-                                                     data_start_year=1984,
-                                                     calibration_year_initial=1984,
-                                                     calibration_year_final=2021,
-                                                     periodicity=compute.Periodicity.monthly)
+                if desc_str == 'basin':
+                    df['SDI_{}'.format(x)] = indices.spi(df['q'].values,
+                                                         scale=x,
+                                                         distribution=indices.Distribution.gamma,
+                                                         data_start_year=1984,
+                                                         calibration_year_initial=1984,
+                                                         calibration_year_final=2021,
+                                                         periodicity=compute.Periodicity.monthly)
 
             for x in range(1, 8):
 
@@ -85,29 +101,22 @@ def write_indices(meta, gridded_data, out_meta, plot_dir=None, desc_str='basin')
                                                       calibration_year_final=2021,
                                                       periodicity=compute.Periodicity.monthly)
 
-            if plot_dir:
-                for met_param in ['SPI_12', 'SPEI_12']:
-                    use_timescale = 3
-                    fig_file = os.path.join(plot_dir, '{}_{}.png'.format(sid, met_param))
-                    plot_indices_panel(df, met_param, use_timescale, month_end,
-                                       fig_file, title_str=sdata['STANAME'])
+            if plot_dir and month_end == 8:
+                fig_file = os.path.join(plot_dir, 'SIMI_{}.png'.format(sid))
+                plot_indices_panel(df, month_end, fig_file, title_str=sdata['STANAME'])
 
-            elif plot_dir and month_end == 10:
-                for met_param in ['SPI_12', 'SPEI_12']:
-                    use_timescale = 3
-                    fig_file = os.path.join(plot_dir, '{}_{}_{}.png'.format(sid, month_end, met_param))
-                    plot_indices_panel_nonstream(df, met_param, use_timescale, month_end, fig_file,
-                                                 title_str=sdata['NAME'])
+            combos = [('SPEI', 'SIMI'), ('SPI', 'SIMI'), ('SDI', 'SIMI')]
+            if desc_str != 'basin':
+                combos = [('SPEI', 'SIMI'), ('SPI', 'SIMI')]
 
-            combos = [('SPI', 'SFI'), ('SPEI', 'SFI'), ('SFI', 'SCUI'), ('SFI', 'SIMI')]
             df = df.loc['1990-01-01':]
             pdf = df.loc[[x for x in df.index if x.month == month_end]]
             dct[sid] = {'irr_area': np.nanmean(df['irr'].values) / 1e6}
-            for met, use in combos[-1:]:
+            for met, use in combos:
                 rmax = 0.0
                 corr_ = [met, use, rmax]
                 for met_ts in met_periods:
-                    if use == 'SFI':
+                    if use == 'SDI':
                         use_periods = range(1, 13)
                     else:
                         use_periods = range(1, 8)
@@ -145,11 +154,16 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_basins_21FEB2023')
-    data_ = os.path.join(root, 'metadata', 'irrigated_gage_metadata.json')
-    out_js = os.path.join(root, 'analysis', 'basin_sensitivities')
-    figs = os.path.join(root, 'figures', 'panel', 'ietr_huc8_29SEP2023')
-    write_indices(data_, merged, out_js, plot_dir=None, desc_str='basins_SFI_SIMI')
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_basins_24OCT2023')
+    data_ = os.path.join(root, 'metadata', 'irrigated_gage_metadata_26OCT2023.json')
+    out_js = os.path.join(root, 'analysis', 'basin_sensitivities_26OCT2023')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_basin_24OCT2023')
+    write_indices(data_, merged, out_js, plot_dir=figs, desc_str='basin')
 
+    merged = os.path.join(root, 'tables', 'input_flow_climate_tables', 'ietr_huc8_24OCT2023')
+    data_ = os.path.join(root, 'metadata', 'huc8_sensitivities_25OCT2023.json')
+    out_js = os.path.join(root, 'analysis', 'huc8_sensitivities_25OCT2023')
+    figs = os.path.join(root, 'figures', 'panel', 'ietr_huc8_24OCT2023')
+    # write_indices(data_, merged, out_js, plot_dir=None, desc_str='huc8')
 
 # ========================= EOF ====================================================================

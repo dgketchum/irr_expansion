@@ -35,7 +35,11 @@ def get_usgs_station_metadata(in_shp, out_shp):
     today = datetime.now(pytz.utc)
 
     for sid, feat in df.iterrows():
-        data = nwis.get_info(sites=[sid])
+        try:
+            data = nwis.get_info(sites=[sid])
+        except Exception as e:
+            print(sid, e, 'skipping')
+            continue
 
         try:
             for param, name in PARAMS.items():
@@ -45,6 +49,7 @@ def get_usgs_station_metadata(in_shp, out_shp):
 
         except KeyError as e:
             print('\n Error on {}: {}'.format(sid, e))
+            continue
 
         recs = nwis.get_record(sites=[sid], start='1800-01-01', end='2023-08-31', service='dv')
         if not isinstance(recs.index, pd.DatetimeIndex):
@@ -57,7 +62,7 @@ def get_usgs_station_metadata(in_shp, out_shp):
             rec_end = '{}-{}-{}'.format(e.year, str(e.month).rjust(2, '0'), str(e.day).rjust(2, '0'))
             df.loc[sid, 'end'] = rec_end
             df.loc[sid, 'last_rec'] = np.round((today - e).days / 365.25, 2)
-            df.loc[sid, 'rec_len'] = df.shape[0]
+            df.loc[sid, 'rec_len'] = recs.shape[0]
             print(sid, df.loc[sid, 'STANAME'], rec_start, rec_end)
 
     df['STAID'] = df.index
@@ -66,7 +71,7 @@ def get_usgs_station_metadata(in_shp, out_shp):
 
 
 if __name__ == '__main__':
-    gages_in = '/media/research/IrrigationGIS/usgs_gages/mt_usgs_gages.shp'
-    gages_out = '/media/research/IrrigationGIS/usgs_gages/mt_usgs_gages_por.shp'
+    gages_in = '/media/research/IrrigationGIS/usgs_gages/expansion_usgs_gages.shp'
+    gages_out = '/media/research/IrrigationGIS/usgs_gages/expansion_usgs_gages_por.shp'
     get_usgs_station_metadata(gages_in, gages_out)
 # ========================= EOF ====================================================================

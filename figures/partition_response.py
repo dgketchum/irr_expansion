@@ -48,11 +48,12 @@ def partition_usbr_response(npy, out_fig):
         df.drop(columns=['month'], inplace=True)
         sns.violinplot(data=df, x='Class', y='SIMI', hue='Management', order=['Dry', 'Normal', 'Wet'],
                        palette=two_color)
+        plt.axhline(y=0, linestyle='--', color='black', linewidth=1)
         plt.xlabel('Climate Classification')
         plt.ylabel('Standardized Irrigation Management Index')
 
-        plt.suptitle('Western Irrigation Management {}'.format(ts))
-        ofig = os.path.join(out_fig, ts)
+        # plt.suptitle('Western Irrigation Management {}'.format(ts))
+        ofig = os.path.join(out_fig, 'management_{}.png'.format(ts))
         plt.legend(ncol=2)
         plt.savefig(ofig)
         plt.close()
@@ -97,10 +98,11 @@ def partition_itype_response(npy, out_fig):
         df.drop(columns=['itype', 'month'], inplace=True)
         sns.violinplot(data=df, x='Class', y='SIMI', hue='Infrastructure', order=['Dry', 'Normal', 'Wet'],
                        palette=four_color)
+        plt.axhline(y=0, linestyle='--', color='black', linewidth=1)
         plt.xlabel('Climate Classification')
         plt.ylabel('Standardized Irrigation Management Index')
 
-        ofig = os.path.join(out_fig, '{}.png'.format(ts))
+        ofig = os.path.join(out_fig, 'itype_{}.png'.format(ts))
         legend = plt.legend(ncol=2)
         plt.savefig(ofig)
         plt.close()
@@ -149,10 +151,11 @@ def partition_cdl_response(npy, out_fig):
         sns.violinplot(data=df, x='Class', y='SIMI', hue='Crop',
                        order=['Dry', 'Normal', 'Wet'], palette=four_color)
 
+        plt.axhline(y=0, linestyle='--', color='black', linewidth=1)
         plt.xlabel('Climate Classification')
         plt.ylabel('Standardized Irrigation Management Index')
 
-        ofig = os.path.join(out_fig, '{}.png'.format(ts))
+        ofig = os.path.join(out_fig, 'cdl_{}.png'.format(ts))
         legend = plt.legend(ncol=2)
 
         plt.savefig(ofig)
@@ -178,5 +181,5 @@ if __name__ == '__main__':
     param = 'itype'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    partition_itype_response(part_, out_)
+    # partition_itype_response(part_, out_)
 # ========================= EOF ====================================================================

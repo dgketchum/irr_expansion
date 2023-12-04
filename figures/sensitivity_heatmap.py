@@ -37,39 +37,40 @@ plt.style.use('seaborn-darkgrid')
 sns.set_style("dark", {'axes.linewidth': 0.5})
 
 
-def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basins', weighted=False):
+def aggregated_heatmap(huc_data, basin_data, fig_d, param='r2', weighted=False):
     met_periods = list(range(1, 13)) + [18, 24, 30, 36]
     target_timescales = []
-    for month in range(8, 9):
+    for month in range(5, 11):
         use_periods = list(range(1, month - 2))
 
-        data = os.path.join(data_dir, '{}_{}.json'.format(desc_str, month))
-
-        with open(data, 'r') as f_obj:
-            data = json.load(f_obj)
-
-        if basins:
-            combos = [('SPI', 'SFI'), ('SPEI', 'SFI'), ('SFI', 'SCUI'), ('SFI', 'SIMI')]
-        else:
-            combos = [('SPEI', 'SIMI'), ('SPI', 'SIMI'), ('SPEI', 'SCUI'), ('SPI', 'SCUI')]
-
-        keys = [list(v.keys()) for k, v in data.items()]
-        keys = list(set([item for sublist in keys for item in sublist]))
-
-        param_vals = {k: [] for k in keys}
-        area_vals = []
-
-        for sid, v in data.items():
-            for key in keys:
-                if key == 'irr_area':
-                    area_vals.append(v[key])
-                    continue
-                try:
-                    param_vals[key].append(v[key][param])
-                except KeyError:
-                    param_vals[key].append(np.nan)
+        combos = [('SDI', 'SIMI'), ('SPEI', 'SIMI'), ('SPI', 'SIMI')]
 
         for met, use in combos:
+
+            if met == 'SDI':
+                data = os.path.join(basin_data, 'basin_{}.json'.format(month))
+            else:
+                data = os.path.join(huc_data, 'huc8_{}.json'.format(month))
+
+            with open(data, 'r') as f_obj:
+                data = json.load(f_obj)
+
+            keys = [list(v.keys()) for k, v in data.items()]
+            keys = list(set([item for sublist in keys for item in sublist]))
+
+            param_vals = {k: [] for k in keys}
+            area_vals = []
+
+            for sid, v in data.items():
+                for key in keys:
+                    if key == 'irr_area':
+                        area_vals.append(v[key])
+                        continue
+                    try:
+                        param_vals[key].append(v[key][param])
+                    except KeyError:
+                        param_vals[key].append(np.nan)
+
             grid = np.zeros((len(use_periods), len(met_periods)))
             for i, u in enumerate(use_periods):
                 for j, m in enumerate(met_periods):
@@ -92,9 +93,11 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
             ax.add_patch(Rectangle((x, y), 1, 1, fill=False, edgecolor='green', lw=4, clip_on=False))
 
             if met == 'SPEI':
-                xaxis_str = 'Standardized Precipitation and Evaporation Index\nMonths'
-            else:
+                xaxis_str = 'Standardized Precipitation and Evaporation Index'
+            elif met == 'SPI':
                 xaxis_str = 'Standardized Precipitation Index'
+            else:
+                xaxis_str = 'Streamflow Drought Index\nMonths'
 
             yaxis_str = 'Standardized Irrigation Managment Index\nMonths'
 
@@ -106,10 +109,11 @@ def aggregated_heatmap(data_dir, fig_d, param='r2', basins=True, desc_str='basin
             fig_file = os.path.join(fig_d, param, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
             plt.savefig(fig_file, bbox_inches='tight')
             plt.close()
-            target_timescales.append((month, x + 1, y + 1))
+            target_timescales.append((met, use, month, x + 1, y + 1))
             print('{:.3f} {}'.format(grid[y, x], os.path.basename(fig_file)))
 
-    print('max correlation timescales: \n', target_timescales)
+    print('max correlation timescales: \n')
+    [print(x) for x in target_timescales]
 
 
 def fields_heatmap(csv, attrs, fig_d):
@@ -180,9 +184,13 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    figs = os.path.join(root, 'figures', 'heatmaps', 'huc8')
-    js_ = os.path.join(root, 'analysis', 'huc8_sensitivities')
-    aggregated_heatmap(js_, figs, param='r2', basins=False, desc_str='huc8', weighted=True)
+    figs = os.path.join(root, 'figures', 'heatmaps', 'basin_and_huc_25OCT2023')
+    huc_s = os.path.join(root, 'analysis', 'huc8_sensitivities_25OCT2023')
+    basin_s = os.path.join(root, 'analysis', 'basin_sensitivities_26OCT2023')
+    aggregated_heatmap(huc_s, basin_s, figs, param='r2', weighted=True)
+
+    # basin_sensitivities_25OCT2023
+    # huc8_sensitivities_25OCT2023
 
     p = 'scui'
     in_ = '/media/nvm/field_pts/indices/{}'.format(p)

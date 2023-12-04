@@ -143,7 +143,7 @@ def extract_area_data(tables, bucket, years, description, features=None, check_e
     irr_min_yr_mask = remap.sum().gte(min_years)
 
     for yr in years:
-        for month in range(6, 7):
+        for month in range(1, 13):
             s = '{}-{}-01'.format(yr, str(month).rjust(2, '0'))
             end_day = monthrange(yr, month)[1]
             e = '{}-{}-{}'.format(yr, str(month).rjust(2, '0'), end_day)
@@ -325,13 +325,13 @@ def ee_task_start(task, n=6):
 
 if __name__ == '__main__':
     bucket = 'wudr'
-    table_ = 'users/dgketchum/hydrography/huc8'
 
-    shp = gpd.read_file('/media/research/IrrigationGIS/expansion/shapefiles/'
-                        'study_area/study_area_huc8_ucrb_wKlamath.shp')
-    feats = list(shp['huc8'])
-
-    # extract_area_data(table_, bucket, list(range(2009, 2022)), 'huc8',
+    # shp = gpd.read_file('/media/research/IrrigationGIS/expansion/shapefiles/'
+    #                     'study_area/study_area_huc8_ucrb_wKlamath.shp')
+    # feats = list(shp['huc8'])
+    #
+    # table_ = 'users/dgketchum/hydrography/huc8'
+    # extract_area_data(table_, bucket, list(range(1987, 2022)), 'huc8',
     #                   join_col='huc8', geo_type='huc', features=feats,
     #                   volumes=True, masks=True)
 

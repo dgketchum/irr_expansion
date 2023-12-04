@@ -1,4 +1,5 @@
 import os
+import json
 from pprint import pprint
 
 import numpy as np
@@ -8,7 +9,7 @@ from flow.gage_data import hydrograph
 
 
 def merge_gridded_flow_data(gridded_dir, out_dir, flow_dir=None, start_year=1987, end_year=2021, glob='glob',
-                            join_key='STAID'):
+                            join_key='STAID', reservoir_mod=False):
     missing, missing_ct, processed_ct = [], 0, 0
 
     l = [os.path.join(gridded_dir, x) for x in os.listdir(gridded_dir) if glob in x]
@@ -87,8 +88,15 @@ def merge_gridded_flow_data(gridded_dir, out_dir, flow_dir=None, start_year=1987
             recs = pd.DataFrame(dict([(x[1], x[0]) for x in [irr, et, cc, ppt, etr, ietr, ept]]), index=idx)
 
             if flow_dir:
+
                 q_file = os.path.join(flow_dir, '{}.csv'.format(sta))
                 qdf = hydrograph(q_file)
+
+                if reservoir_mod:
+                    s = qdf['delta_s']
+                    s[pd.isna(s)] = 0
+                    qdf['q'] = qdf['q'] + s
+
                 h = pd.concat([qdf, recs], axis=1)
             else:
                 h = recs
@@ -114,13 +122,19 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data/IrrigationGIS/expansion'
 
-    bname = 'ietr_basins_21FEB2023'
+    bname = 'ietr_basins_24OCT2023'
+    # bname = 'ietr_huc8_24OCT2023'
 
     basin_extracts = os.path.join(root, 'tables', 'gridded_tables', bname)
     merged = os.path.join(root, 'tables', 'input_flow_climate_tables', bname)
-    hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
 
+    # hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
+    # merge_gridded_flow_data(basin_extracts, merged, flow_dir=None,
+    #                         glob='huc8', join_key='huc8')
+
+    res = os.path.join(root, 'metadata', 'res_ibt_metadata_26OCT2023.json')
+    hydrographs_ = os.path.join(root, 'tables', 'hydrographs', 'monthly_q')
     merge_gridded_flow_data(basin_extracts, merged, flow_dir=hydrographs_,
-                            glob=bname, join_key='STAID')
+                            glob='basin', join_key='GAGE_ID', reservoir_mod=res)
 
 # ========================= EOF ====================================================================
