@@ -51,6 +51,7 @@ def aggregated_heatmap(huc_data, basin_data, fig_d, param='r2', weighted=False):
                 data = os.path.join(basin_data, 'basin_{}.json'.format(month))
             else:
                 data = os.path.join(huc_data, 'huc8_{}.json'.format(month))
+                continue
 
             with open(data, 'r') as f_obj:
                 data = json.load(f_obj)
@@ -107,7 +108,7 @@ def aggregated_heatmap(huc_data, basin_data, fig_d, param='r2', weighted=False):
             ax.tick_params(axis='y', which='major', pad=30)
             plt.tight_layout()
             fig_file = os.path.join(fig_d, param, '{}_{}_{}_heatmap.png'.format(met.lower(), use.lower(), month))
-            plt.savefig(fig_file, bbox_inches='tight')
+            plt.savefig(fig_file, bbox_inches='tight', dpi=4 * plt.gcf().dpi)
             plt.close()
             target_timescales.append((met, use, month, x + 1, y + 1))
             print('{:.3f} {}'.format(grid[y, x], os.path.basename(fig_file)))

@@ -55,7 +55,7 @@ def partition_usbr_response(npy, out_fig):
         # plt.suptitle('Western Irrigation Management {}'.format(ts))
         ofig = os.path.join(out_fig, 'management_{}.png'.format(ts))
         plt.legend(ncol=2)
-        plt.savefig(ofig)
+        plt.savefig(ofig, dpi=4 * plt.gcf().dpi)
         plt.close()
         print(ofig, '\n')
 
@@ -104,7 +104,7 @@ def partition_itype_response(npy, out_fig):
 
         ofig = os.path.join(out_fig, 'itype_{}.png'.format(ts))
         legend = plt.legend(ncol=2)
-        plt.savefig(ofig)
+        plt.savefig(ofig, dpi=4 * plt.gcf().dpi)
         plt.close()
         print(ofig, '\n')
 
@@ -158,7 +158,7 @@ def partition_cdl_response(npy, out_fig):
         ofig = os.path.join(out_fig, 'cdl_{}.png'.format(ts))
         legend = plt.legend(ncol=2)
 
-        plt.savefig(ofig)
+        plt.savefig(ofig, dpi=4 * plt.gcf().dpi)
         plt.close()
         print(ofig, '\n')
 
@@ -171,15 +171,15 @@ if __name__ == '__main__':
     param = 'usbr'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    partition_usbr_response(part_, out_)
+    # partition_usbr_response(part_, out_)
 
     param = 'cdl'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    partition_cdl_response(part_, out_)
+    # partition_cdl_response(part_, out_)
 
     param = 'itype'
     part_ = os.path.join(root, 'field_pts/partitioned_npy/{}'.format(param))
     out_ = os.path.join(root, 'figures', 'partitions', '{}'.format(param))
-    # partition_itype_response(part_, out_)
+    partition_itype_response(part_, out_)
 # ========================= EOF ====================================================================

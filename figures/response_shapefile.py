@@ -127,7 +127,7 @@ def write_response_histogram(csv, areas, out_fig):
 
     plt.tight_layout()
     # plt.show()
-    plt.savefig(out_fig)
+    plt.savefig(out_fig, dpi=5 * plt.gcf().dpi)
 
 
 if __name__ == '__main__':
@@ -146,7 +146,7 @@ if __name__ == '__main__':
 
     # write_response_shapefile(in_, meta, s, oshp, None)
 
-    out_ = os.path.join(root, 'figures', 'field_pts', 'fields_response_hist_14JUN2023.png')
+    out_ = os.path.join(root, 'figures', 'field_pts', 'fields_response_hist_5DEC2023.png')
     write_response_histogram(in_, fields_area, out_)
 
     park = '/media/research/IrrigationGIS/expansion/figures/park_fields'
