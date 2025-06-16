@@ -38,7 +38,7 @@ model_list = ['bcc-csm1-1',
               'NorESM1-M']
 
 # testing combos
-model_list = ['bcc-csm1-1', 'bcc-csm1-1-m']
+# model_list = ['bcc-csm1-1', 'bcc-csm1-1-m']
 
 # ftr from ee asset upload (add .shp to ftr option)
 ftr = ee.FeatureCollection('projects/ee-dgketchum/assets/swim/gridmet_selected_points_nevada')

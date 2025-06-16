@@ -12,7 +12,7 @@ from climate_indices import compute, indices
 from transition_modeling.transition_data import KEYS, OLD_KEYS
 from field_points.crops import cdl_key
 
-COLS = ['et', 'cc', 'ppt', 'etr', 'eff_ppt', 'ietr']
+COLS = ['et', 'cc', 'ppt', 'eto', 'eff_ppt']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
 
 IDX_KWARGS = dict(distribution=indices.Distribution.gamma,
@@ -60,15 +60,15 @@ def f_(d_):
     return coref
 
 
-def correlations(state, npy_dir, out_dir, procs, calc):
+def correlations(desc, npy_dir, out_dir, procs, calc):
     met_periods = list(range(1, 13)) + [18, 24, 30, 36]
     ag_periods = list(range(1, 8))
     periods = list(product(met_periods, ag_periods))
 
-    npy = os.path.join(npy_dir, '{}.npy'.format(state))
+    npy = os.path.join(npy_dir, '{}.npy'.format(desc))
     print('\n', npy)
     js = npy.replace('.npy', '_index.json')
-    data = np.fromfile(npy, dtype=float)
+    data = np.load(npy)
 
     with open(js, 'r') as fp:
         index = json.load(fp)['index']
@@ -76,7 +76,7 @@ def correlations(state, npy_dir, out_dir, procs, calc):
     print(len(index), 'fields')
     data = data.reshape((len(index), -1, len(COLS)))
     df = pd.DataFrame(index=index)
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1987, 2022) for m in range(1, 13)]
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1985, 2024) for m in range(1, 13)]
     months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
 
     for met_p, ag_p in periods:
@@ -84,7 +84,7 @@ def correlations(state, npy_dir, out_dir, procs, calc):
         start_time = timeit.default_timer()
 
         if calc == 'simi':
-            kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+            kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('eto')]
         else:
             kc = data[:, :, COLS.index('cc')]
             kc[kc < 0.] = 0.
@@ -92,10 +92,10 @@ def correlations(state, npy_dir, out_dir, procs, calc):
         simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
 
         # uses locally modified climate_indices package that takes cwb = ppt - pet as input
-        cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
-        spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=cwb, axis=1)
+        ppt = data[:, :, COLS.index('ppt')]
+        spi = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=ppt, axis=1)
 
-        stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months])
+        stack = np.stack([simi[:, -len(dt_range):], spi[:, -len(dt_range):], months])
 
         for m in range(4, 11):
 
@@ -118,9 +118,9 @@ def correlations(state, npy_dir, out_dir, procs, calc):
             col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, m)
             df[col] = corefs
 
-        print(state, met_p, ag_p, '{:.3f}'.format(timeit.default_timer() - start_time))
+        print(desc, met_p, ag_p, '{:.3f}'.format(timeit.default_timer() - start_time))
 
-    ofile = os.path.join(out_dir, calc, '{}.csv'.format(state))
+    ofile = os.path.join(out_dir, calc, '{}.csv'.format(desc))
     df.to_csv(ofile)
     return ofile
 
@@ -194,7 +194,7 @@ def partition_data(npy, out_dir, calc='simi', classification='usbr'):
                                           len(dt_range), axis=1)
 
                 if calc == 'simi':
-                    kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ietr')]
+                    kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ieto')]
                 else:
                     kc = data[:, :, COLS.index('cc')]
                     kc[kc < 0.] = 0.
@@ -202,7 +202,7 @@ def partition_data(npy, out_dir, calc='simi', classification='usbr'):
                 simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_time, **IDX_KWARGS), arr=kc, axis=1)
 
                 # depends on locally modified climate_indices package that takes cwb = ppt - pet as input to spei
-                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
+                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('eto')]
                 spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_time, **IDX_KWARGS), arr=cwb, axis=1)
                 stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months, classific])
                 d = stack[:, stack[2] == float(month_end)].reshape((4, len(index[s_ind:e_ind]), -1))
@@ -295,7 +295,7 @@ def cdl_spei(npy, cdl_timescale, out_dir):
                 data = data[:, -len(dt_range):, :]
 
                 # depends on locally modified climate_indices package that takes cwb = ppt - pet as input to spei
-                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('etr')]
+                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('eto')]
                 spei_ = np.apply_along_axis(lambda x: indices.spei(cwb_mm=x, scale=ts, **IDX_KWARGS),
                                             arr=cwb, axis=1)
                 if lb > 5:
@@ -388,8 +388,10 @@ if __name__ == '__main__':
     if not os.path.exists(root):
         root = '/home/dgketchum/data'
 
-    indir = os.path.join(root, 'field_pts/fields_data/fields_npy')
-    odir = os.path.join(root, 'field_pts/indices')
+    indir = os.path.join(root, 'dri_field_pts/fields_data/fields_npy')
+    odir = os.path.join(root, 'dri_field_pts/indices')
+
+    correlations('field_summaries_EToF_final', indir, odir, procs=1, calc='simi')
 
     part = 'cdl'
     t_scales = '/media/research/IrrigationGIS/expansion/analysis/cdl_spei_timescales.json'
@@ -399,5 +401,5 @@ if __name__ == '__main__':
 
     param = 'cc'
     ccons = os.path.join(root, 'field_pts/fields_data/cdl_{}.json'.format(param))
-    cdl_et(indir, ccons, param)
+    # cdl_et(indir, ccons, param)
 # ========================= EOF ====================================================================
