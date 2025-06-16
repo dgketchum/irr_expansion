@@ -28,10 +28,12 @@ def preproc_csv_to_npy(in_csv, outdir):
 
         if first:
             array = np.zeros((len(fids), len(dates), len(REMAP_COLS))) * np.nan
-            idxes.append(fid)
             first = False
 
+        idxes.append(fid)
         array[i, :, :] = subarray.values.reshape((1, len(dates), len(REMAP_COLS)))
+        nan_ct = [(c, np.count_nonzero(np.isnan(subarray[c]))) for c in COLS]
+        print(f'{fid} nan values: {nan_ct}')
 
     out_json = os.path.join(outdir, os.path.basename(csv).replace('.csv', '_index.json'))
     with open(out_json, 'w') as f:
@@ -39,12 +41,12 @@ def preproc_csv_to_npy(in_csv, outdir):
 
     out_npy = os.path.join(outdir, os.path.basename(csv).replace('.csv', '.npy'))
     np.save(out_npy, array)
-    print(f'saved {out_json}')
-    print(f'saved {out_npy}')
+    print(f'saved {out_json}, len {idxes}')
+    print(f'saved {out_npy}, shape: {array.shape}')
 
 
 if __name__ == '__main__':
-    csv = '/media/nvm/dri_field_pts/fields_data/field_summaries_EToF_final.csv'
+    csv = '/media/nvm/dri_field_pts/fields_data/field_summaries_EToF_final_SW.csv'
     outdir_ = '/media/nvm/dri_field_pts/fields_data/fields_npy'
     preproc_csv_to_npy(csv, outdir_)
 # ========================= EOF ====================================================================

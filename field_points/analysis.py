@@ -16,9 +16,9 @@ COLS = ['et', 'cc', 'ppt', 'eto', 'eff_ppt']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
 
 IDX_KWARGS = dict(distribution=indices.Distribution.gamma,
-                  data_start_year=1984,
-                  calibration_year_initial=1984,
-                  calibration_year_final=2021,
+                  data_start_year=1985,
+                  calibration_year_initial=1985,
+                  calibration_year_final=2023,
                   periodicity=compute.Periodicity.monthly)
 
 
@@ -74,7 +74,7 @@ def correlations(desc, npy_dir, out_dir, procs, calc):
         index = json.load(fp)['index']
 
     print(len(index), 'fields')
-    data = data.reshape((len(index), -1, len(COLS)))
+    # data = data.reshape((len(index), -1, len(COLS)))
     df = pd.DataFrame(index=index)
     dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1985, 2024) for m in range(1, 13)]
     months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
@@ -91,9 +91,8 @@ def correlations(desc, npy_dir, out_dir, procs, calc):
 
         simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
 
-        # uses locally modified climate_indices package that takes cwb = ppt - pet as input
         ppt = data[:, :, COLS.index('ppt')]
-        spi = np.apply_along_axis(lambda x: indices.spei(x, scale=met_p, **IDX_KWARGS), arr=ppt, axis=1)
+        spi = np.apply_along_axis(lambda x: indices.spi(x, scale=met_p, **IDX_KWARGS), arr=ppt, axis=1)
 
         stack = np.stack([simi[:, -len(dt_range):], spi[:, -len(dt_range):], months])
 
@@ -377,7 +376,7 @@ def cdl_et(npy, out_js, parameter):
 
         mean_cc = ((df['count'] * df['mean_cc']) / df['count'].sum()).sum()
         dct[crop] = mean_cc
-        print('{} {}: {:.3f}'.format(crop,  cdl_[crop][0], mean_cc))
+        print('{} {}: {:.3f}'.format(crop, cdl_[crop][0], mean_cc))
 
     with open(out_js, 'w') as fp:
         json.dump(dct, fp, indent=4)
