@@ -9,30 +9,6 @@ REMAP_COLS = {'ETa_final_acre_ft': 'et', 'NetET_final_acre_ft': 'cc', 'PPT_MM': 
               'ETO_MM': 'eto', 'Eff_PPT_Adjusted_acre_ft': 'eff_ppt'}
 
 COLS = ['et', 'cc', 'ppt', 'eto', 'eff_ppt']
-
-FUTURE_SCENARIO_LIST = ['rcp45', 'rcp85']
-
-MODEL_LIST = ['bcc-csm1-1',
-              'bcc-csm1-1-m',
-              'BNU-ESM',
-              'CanESM2',
-              'CCSM4',
-              'CNRM-CM5',
-              'CSIRO-Mk3-6-0',
-              'GFDL-ESM2G',
-              'GFDL-ESM2M',
-              'HadGEM2-CC365',
-              'HadGEM2-ES365',
-              'inmcm4',
-              'IPSL-CM5A-MR',
-              'IPSL-CM5A-LR',
-              'IPSL-CM5B-LR',
-              'MIROC5',
-              'MIROC-ESM',
-              'MIROC-ESM-CHEM',
-              'MRI-CGCM3',
-              'NorESM1-M']
-
 GRIDMET_RESAMPLE_MAP = {'year': 'first',
                         'month': 'first',
                         'day': 'first',
@@ -43,12 +19,8 @@ GRIDMET_RESAMPLE_MAP = {'year': 'first',
                         'prcp_mm': 'sum',
                         'eto_mm_uncorr': 'sum'}
 
-
-def preproc_csv_to_npy(in_pqt, gridmet, gridmet_gfid, outdir, target_areas=None):
-
+def preprocess_historical(in_pqt, gridmet, gridmet_gfid, outdir, target_areas=None):
     fields = pd.read_csv(gridmet_gfid, index_col='OPENET_ID')
-
-    first, idxes, array = True, [], None
 
     hyd_areas = [(f.split('.')[0], os.path.join(in_pqt, f)) for f in os.listdir(in_pqt) if f.endswith('parquet')]
 
@@ -62,6 +34,7 @@ def preproc_csv_to_npy(in_pqt, gridmet, gridmet_gfid, outdir, target_areas=None)
         zone_fids = list(set(df['OPENET_ID'].values))
         zone_fields = fields.loc[[i for i in fields.index if i in zone_fids]]
 
+        first, idxes, array = True, [], None
 
         for i, (fid, v) in enumerate(tqdm(zone_fields.iterrows(),
                                           desc=f'Processing {hydro_area}',
@@ -100,15 +73,13 @@ def preproc_csv_to_npy(in_pqt, gridmet, gridmet_gfid, outdir, target_areas=None)
         print(f'saved {out_npy}, shape: {array.shape}')
 
 
-def split_input(pqt, split_out, hyd_areas_file):
-
+def split_etof_input(pqt, split_out, hyd_areas_file):
     df = pd.read_parquet(pqt)
 
     hyd_areas = df['HYD_AREA'].unique()
     zones = []
 
     for hyd in hyd_areas:
-
         a = df[df['HYD_AREA'] == hyd].copy()
         out_file = os.path.join(split_out, f'{hyd}.parquet')
         a.to_parquet(out_file)
@@ -119,6 +90,8 @@ def split_input(pqt, split_out, hyd_areas_file):
         json.dump({'tiles': zones}, f, indent=4)
 
     print(hyd_areas_file)
+
+
 
 if __name__ == '__main__':
 
@@ -132,7 +105,7 @@ if __name__ == '__main__':
     pqt_ = os.path.join(fields_data, 'NV_field_summaries_EToF_final_large.parquet')
     js_ = os.path.join(fields_data, 'NV_field_summaries_EToF_tiles.json')
     pqt_dir = os.path.join(fields_data, 'fields_pqt')
-    # split_input(pqt_, pqt_dir, js_)
+    split_etof_input(pqt_, pqt_dir, js_)
 
     npy_dir = os.path.join(fields_data, 'fields_npy')
     fields_gis = os.path.join(nv_data, 'fields_gis')
@@ -142,9 +115,6 @@ if __name__ == '__main__':
 
     met = os.path.join(fields_data, 'gridmet')
 
-    preproc_csv_to_npy(pqt_dir, met, gridmet_factors_, npy_dir, target_areas=['117'])
+    preprocess_historical(pqt_dir, met, gridmet_factors_, npy_dir, target_areas=None)
 
-    csv_dir = os.path.join(root, 'Nevada/projections/exports')
-    splits = os.path.join(root, 'Nevada/projections/splits')
-    # split_projections(csv_dir, splits)
 # ========================= EOF ====================================================================
