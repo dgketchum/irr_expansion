@@ -1,16 +1,15 @@
-import os
 import json
-import timeit
+import os
 from itertools import product
 from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
+from climate_indices import compute, indices
 
 from field_points.crop_codes import BASIN_STATES
-from climate_indices import compute, indices
-from transition_modeling.transition_data import KEYS, OLD_KEYS
 from field_points.crops import cdl_key
+from transition_modeling.transition_data import KEYS, OLD_KEYS
 
 COLS = ['et', 'cc', 'ppt', 'eto', 'eff_ppt']
 META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
@@ -56,70 +55,83 @@ class ArrayDisAssembly(object):
 
 
 def f_(d_):
-    coref = [np.ma.corrcoef(d_[0, i, :], d_[1, i, :])[0][1].item() ** 2 for i in range(d_.shape[1])]
+    coref = [np.ma.corrcoef(d_[0, i, :], d_[1, i, :])[0][1].item() for i in range(d_.shape[1])]
     return coref
 
 
 def correlations(desc, npy_dir, out_dir, procs, calc):
-    met_periods = list(range(1, 13)) + [18, 24, 30, 36]
-    ag_periods = list(range(1, 8))
+    met_periods = list(range(1, 13))  + [18, 24, 30, 36]
+    ag_periods = list(range(1, 13))
     periods = list(product(met_periods, ag_periods))
 
     npy = os.path.join(npy_dir, '{}.npy'.format(desc))
     print('\n', npy)
     js = npy.replace('.npy', '_index.json')
-    data = np.load(npy)
+    input_array = np.load(npy)
 
     with open(js, 'r') as fp:
         index = json.load(fp)['index']
 
     print(len(index), 'fields')
     # data = data.reshape((len(index), -1, len(COLS)))
-    df = pd.DataFrame(index=index)
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1985, 2024) for m in range(1, 13)]
+    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1980, 2025) for m in range(1, 13)]
     months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
-
+    series = {}
     for met_p, ag_p in periods:
 
-        start_time = timeit.default_timer()
-
         if calc == 'simi':
-            kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('eto')]
+            kc = input_array[:, :, COLS.index('et')].copy() / input_array[:, :, COLS.index('eto')].copy()
         else:
-            kc = data[:, :, COLS.index('cc')]
+            kc = input_array[:, :, COLS.index('cc')].copy()
             kc[kc < 0.] = 0.
 
         simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
 
-        ppt = data[:, :, COLS.index('ppt')]
+        ppt = input_array[:, :, COLS.index('ppt')].copy()
         spi = np.apply_along_axis(lambda x: indices.spi(x, scale=met_p, **IDX_KWARGS), arr=ppt, axis=1)
 
         stack = np.stack([simi[:, -len(dt_range):], spi[:, -len(dt_range):], months])
 
-        for m in range(4, 11):
+        for from_month in range(4, 11):
 
-            if m - ag_p < 3:
+            if from_month - ag_p < 3:
                 continue
 
-            d = stack[:, stack[2] == float(m)].reshape((3, len(index), -1))
-            mx = np.ma.masked_array(np.repeat(np.isnan(d[:1, :, :]), 3, axis=0))
-            d = np.ma.MaskedArray(d, mx)
+            d_unmasked = stack[:, stack[2] == float(from_month)].copy().reshape((3, len(index), -1))
+            mx = np.ma.masked_array(np.repeat(np.isnan(d_unmasked[:1, :, :]), 3, axis=0))
+            d = np.ma.MaskedArray(d_unmasked, mx)
 
             a = ArrayDisAssembly(d)
             arrays = a.disassemble(n_sections=procs)
-            pool = Pool(processes=procs)
 
-            with pool as p:
-                pool_results = [p.apply_async(f_, args=(a_,)) for a_ in arrays]
-                corefs = [res.get() for res in pool_results]
+            if procs > 1:
+                pool = Pool(processes=procs)
 
-            corefs = np.array([item for sublist in corefs for item in sublist])
-            col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, m)
-            df[col] = corefs
+                with pool as p:
+                    pool_results = [p.apply_async(f_, args=(a_,)) for a_ in arrays]
+                    corefs = [res.get() for res in pool_results]
+                    corefs = np.array([item for sublist in corefs for item in sublist])
 
-        print(desc, met_p, ag_p, '{:.3f}'.format(timeit.default_timer() - start_time))
+            else:
+                corefs = f_(arrays[0])
+                corefs = np.array(corefs)
+
+            col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, from_month)
+            series[col] = corefs
+            print(f'{col:10} correlation: {corefs.min():.4f} to {corefs.max():.4f}')
+            pass
+
+        # print(desc, met_p, ag_p, '{:.3f}'.format(timeit.default_timer() - start_time))
+
+    cols = sorted(list(series.keys()))
+    df_data = np.array([series[k] for k in cols]).T
+    df = pd.DataFrame(index=index, data=df_data, columns=cols)
 
     ofile = os.path.join(out_dir, calc, '{}.csv'.format(desc))
+
+    for k, v in series.items():
+        df[k] = v
+
     df.to_csv(ofile)
     return ofile
 
@@ -383,14 +395,18 @@ def cdl_et(npy, out_js, parameter):
 
 
 if __name__ == '__main__':
-    root = '/media/nvm'
+    root = '/media/research/IrrigationGIS'
     if not os.path.exists(root):
-        root = '/home/dgketchum/data'
+        root = '/home/dgketchum/data/IrrigationGIS'
 
-    indir = os.path.join(root, 'dri_field_pts/fields_data/fields_npy')
-    odir = os.path.join(root, 'dri_field_pts/indices')
+    nv_data = os.path.join(root, 'Nevada', 'dri_field_pts')
 
-    correlations('field_summaries_EToF_final', indir, odir, procs=1, calc='simi')
+    pqt = os.path.join(nv_data, 'fields_data', 'field_summaries_EToF_final.parquet')
+    indir = os.path.join(nv_data, 'fields_data', 'fields_npy')
+    odir = os.path.join(nv_data, 'fields_data', 'indices')
+
+    # correlations('field_summaries_EToF_final', indir, odir, procs=6, calc='simi')
+    correlations('field_summaries_EToF_final', indir, odir, procs=6, calc='cc')
 
     part = 'cdl'
     t_scales = '/media/research/IrrigationGIS/expansion/analysis/cdl_spei_timescales.json'

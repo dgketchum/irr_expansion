@@ -17,10 +17,6 @@ from rasterstats import zonal_stats
 from dri.thredds import GridMet
 
 CLIMATE_COLS = {
-    # 'etr': {
-    #     'nc': 'agg_met_etr_1979_CurrentYear_CONUS',
-    #     'var': 'daily_mean_reference_evapotranspiration_alfalfa',
-    #     'col': 'etr_mm'},
     'pet': {
         'nc': 'agg_met_pet_1979_CurrentYear_CONUS',
         'var': 'daily_mean_reference_evapotranspiration_grass',
@@ -29,37 +25,12 @@ CLIMATE_COLS = {
         'nc': 'agg_met_pr_1979_CurrentYear_CONUS',
         'var': 'precipitation_amount',
         'col': 'prcp_mm'},
-    # 'srad': {
-    #     'nc': 'agg_met_srad_1979_CurrentYear_CONUS',
-    #     'var': 'daily_mean_shortwave_radiation_at_surface',
-    #     'col': 'srad_wm2'},
-    # 'tmmx': {
-    #     'nc': 'agg_met_tmmx_1979_CurrentYear_CONUS',
-    #     'var': 'daily_maximum_temperature',
-    #     'col': 'tmax_k'},
-    # 'tmmn': {
-    #     'nc': 'agg_met_tmmn_1979_CurrentYear_CONUS',
-    #     'var': 'daily_minimum_temperature',
-    #     'col': 'tmin_k'},
-    # 'vs': {
-    #     'nc': 'agg_met_tmmn_1979_CurrentYear_CONUS',
-    #     'var': 'daily_minimum_temperature',
-    #     'col': 'u2_ms'},
-    # 'sph': {
-    #     'nc': 'agg_met_tmmn_1979_CurrentYear_CONUS',
-    #     'var': 'daily_minimum_temperature',
-    #     'col': 'q'},
 }
 
 GRIDMET_GET = ['elev_m',
-               # 'tmin_c',
-               # 'tmax_c',
-               # 'etr_mm',
+
                'eto_mm',
                'prcp_mm',
-               # 'srad_wm2',
-               # 'u2_ms',
-               # 'ea_kpa',
                ]
 
 BASIC_REQ = ['date', 'year', 'month', 'day', 'centroid_lat', 'centroid_lon']
@@ -67,84 +38,54 @@ BASIC_REQ = ['date', 'year', 'month', 'day', 'centroid_lat', 'centroid_lon']
 COLUMN_ORDER = BASIC_REQ + GRIDMET_GET
 
 
-def find_gridmet_points(fields, gridmet_points, gridmet_ras, fields_join,
-                        factors_js, field_select=None, feature_id='FID'):
-    """This depends on running 'Raster Pixels to Points' on a WGS Gridmet raster,
-     attributing GFID, lat, and lon in the attribute table, and saving to project crs: 5071.
-     GFID is an arbitrary identifier e.g., @row_number. It further depends on projecting the
-     rasters to EPSG:5071, usng the project.sh bash script
+def run_zonal_stats_for_fields(fields_with_gfid, gridmet_points, gridmet_ras,
+                               factors_js, field_select=None, feature_id='FID'):
+    """"""
 
-     The reason we're not just doing a zonal stat on correction surface for every object is that
-     there may be many fields that only need data from one gridmet cell. This prevents us from downloading
-     many redundant data sets.
-    """
+    convert_to_wgs84 = pyproj.Transformer.from_crs('EPSG:5071', 'EPSG:4326', always_xy=True).transform
 
-    print('Find field-gridmet joins')
-
-    convert_to_wgs84 = lambda x, y: pyproj.Transformer.from_crs('EPSG:5071', 'EPSG:4326').transform(x, y)
-
-    fields = gpd.read_file(fields)
+    fields = gpd.read_file(fields_with_gfid)
     gridmet_pts = gpd.read_file(gridmet_points)
-    gridmet_pts.index = gridmet_pts['GFID']
+    gridmet_pts = gridmet_pts.set_index('GFID')
 
     rasters = []
-
-    for v in ['eto', 'etr']:
-        [rasters.append(os.path.join(gridmet_ras, 'gridmet_corrected_{}_{}.tif'.format(v, m))) for m in range(1, 13)]
+    for var in ['eto', 'etr']:
+        for month in range(1, 13):
+            raster_path = os.path.join(gridmet_ras, f'gridmet_corrected_{var}_{month}.tif')
+            rasters.append(raster_path)
 
     gridmet_targets = {}
-    first = True
-    for i, field in tqdm(fields.iterrows(), desc='Finding Nearest GridMET Neighbors', total=fields.shape[0]):
 
-        if field_select:
-            if str(field[feature_id]) not in field_select:
-                continue
+    for i, field in tqdm(fields.iterrows(), desc='Extraction GriMET correction factors', total=fields.shape[0]):
 
-        min_distance = 1e13
-        closest_fid = None
+        if field_select and str(field[feature_id]) not in field_select:
+            continue
 
-        xx, yy = field['geometry'].centroid.x, field['geometry'].centroid.y
-        lat, lon = convert_to_wgs84(xx, yy)
-        fields.at[i, 'LAT'] = lat
-        fields.at[i, 'LON'] = lon
+        centroid = field['geometry'].centroid
+        lon, lat = convert_to_wgs84(centroid.x, centroid.y)
+        gfid = field['GFID']
 
-        for j, g_point in gridmet_pts.iterrows():
-            distance = field['geometry'].centroid.distance(g_point['geometry'])
+        fields.at[i, 'STATION_ID'] = gfid
 
-            if distance < min_distance:
-                min_distance = distance
-                closest_fid = j
-                closest_geo = g_point['geometry']
-
-        fields.at[i, 'GFID'] = closest_fid
-        fields.at[i, 'STATION_ID'] = closest_fid
-
-        if first:
-            print('Matched {} to {}'.format(field[feature_id], closest_fid))
-            first = False
-
-        if closest_fid not in gridmet_targets.keys():
-            gridmet_targets[closest_fid] = {str(m): {} for m in range(1, 13)}
-            gdf = gpd.GeoDataFrame({'geometry': [closest_geo]})
-            gridmet_targets[closest_fid]['lat'] = gridmet_pts.loc[closest_fid]['lat']
-            gridmet_targets[closest_fid]['lon'] = gridmet_pts.loc[closest_fid]['lon']
+        if gfid not in gridmet_targets:
+            gridmet_targets[gfid] = {str(m): {} for m in range(1, 13)}
+            gridmet_point_geom = gridmet_pts.loc[gfid]['geometry']
+            gridmet_targets[gfid]['lat'] = gridmet_pts.loc[gfid]['lat']
+            gridmet_targets[gfid]['lon'] = gridmet_pts.loc[gfid]['lon']
+            gdf_point = gpd.GeoDataFrame({'geometry': [gridmet_point_geom]}, crs='EPSG:5071')
             for r in rasters:
-                splt = r.split('_')
-                _var, month = splt[-2], splt[-1].replace('.tif', '')
-                stats = zonal_stats(gdf, r, stats=['mean'])[0]['mean']
-                gridmet_targets[closest_fid][month].update({_var: stats})
+                try:
+                    splt = os.path.basename(r).split('_')
+                    _var, month = splt[-2], splt[-1].replace('.tif', '')
+                    stats = zonal_stats(gdf_point, r, stats=['mean'])[0]['mean']
+                    gridmet_targets[gfid][month].update({_var: stats})
+                except Exception as e:
+                    print(f"failed on {r} for GFID {gfid}. Error: {e}")
 
-        g = GridMet('elev', lat=fields.at[i, 'LAT'], lon=fields.at[i, 'LON'])
-        elev = g.get_point_elevation()
-        fields.at[i, 'ELEV'] = elev
-
-    fields.to_file(fields_join, crs='EPSG:5071', engine='fiona')
-
-    len_ = len(gridmet_targets.keys())
-    print('Get gridmet for {} target points'.format(len_))
+        print(f'{i} of {fields.shape[0]} gridmet points processed', flush=True)
 
     with open(factors_js, 'w') as fp:
-        json.dump(gridmet_targets, fp, indent=4)
+        json.dump(gridmet_targets, fp, indent=4, sort_keys=True)
 
 
 def get_gridmet_corrections(fields, gridmet_ras, fields_join,
@@ -279,7 +220,7 @@ def download_gridmet(fields, gridmet_factors, gridmet_csv_dir, start=None, end=N
                 df['elev_m'] = [elev for _ in range(df.shape[0])]
                 first = False
 
-        for _var in ['eto']: # etr
+        for _var in ['eto']:  # etr
             variable = '{}_mm'.format(_var)
             out_cols.append('{}_uncorr'.format(variable))
             for month in range(1, 13):
@@ -300,143 +241,34 @@ def download_gridmet(fields, gridmet_factors, gridmet_csv_dir, start=None, end=N
             return df
 
 
-# from CGMorton's RefET (github.com/WSWUP/RefET)
-def air_pressure(elev, method='asce'):
-    """Mean atmospheric pressure at station elevation (Eqs. 3 & 34)
-
-    Parameters
-    ----------
-    elev : scalar or array_like of shape(M, )
-        Elevation [m].
-    method : {'asce' (default), 'refet'}, optional
-        Calculation method:
-        * 'asce' -- Calculations will follow ASCE-EWRI 2005 [1] equations.
-        * 'refet' -- Calculations will follow RefET software.
-
-    Returns
-    -------
-    ndarray
-        Air pressure [kPa].
-
-    Notes
-    -----
-    The current calculation in Ref-ET:
-        101.3 * (((293 - 0.0065 * elev) / 293) ** (9.8 / (0.0065 * 286.9)))
-    Equation 3 in ASCE-EWRI 2005:
-        101.3 * (((293 - 0.0065 * elev) / 293) ** 5.26)
-    Per Dr. Allen, the calculation with full precision:
-        101.3 * (((293.15 - 0.0065 * elev) / 293.15) ** (9.80665 / (0.0065 * 286.9)))
-
-    """
-    pair = np.array(elev, copy=True, ndmin=1).astype(np.float64)
-    pair *= -0.0065
-    if method == 'asce':
-        pair += 293
-        pair /= 293
-        np.power(pair, 5.26, out=pair)
-    elif method == 'refet':
-        pair += 293
-        pair /= 293
-        np.power(pair, 9.8 / (0.0065 * 286.9), out=pair)
-    # np.power(pair, 5.26, out=pair)
-    pair *= 101.3
-
-    return pair
-
-
-# from CGMorton's RefET (github.com/WSWUP/RefET)
-def actual_vapor_pressure(q, pair):
-    """"Actual vapor pressure from specific humidity
-
-    Parameters
-    ----------
-    q : scalar or array_like of shape(M, )
-        Specific humidity [kg/kg].
-    pair : scalar or array_like of shape(M, )
-        Air pressure [kPa].
-
-    Returns
-    -------
-    ndarray
-        Actual vapor pressure [kPa].
-
-    Notes
-    -----
-    ea = q * pair / (0.622 + 0.378 * q)
-
-    """
-    ea = np.array(q, copy=True, ndmin=1).astype(np.float64)
-    ea *= 0.378
-    ea += 0.622
-    np.reciprocal(ea, out=ea)
-    ea *= pair
-    ea *= q
-
-    return ea
-
-
-# from CGMorton's RefET (github.com/WSWUP/RefET)
-def wind_height_adjust(uz, zw):
-    """Wind speed at 2 m height based on full logarithmic profile (Eq. 33)
-
-    Parameters
-    ----------
-    uz : scalar or array_like of shape(M, )
-        Wind speed at measurement height [m s-1].
-    zw : scalar or array_like of shape(M, )
-        Wind measurement height [m].
-
-    Returns
-    -------
-    ndarray
-        Wind speed at 2 m height [m s-1].
-
-    """
-    return uz * 4.87 / np.log(67.8 * zw - 5.42)
-
-
-def gridmet_elevation(shp_in, shp_out):
-    df = gpd.read_file(shp_in)
-    l = []
-    for i, r in df.iterrows():
-        lat, lon = r['lat'], r['lon']
-        g = GridMet('elev', lat=lat, lon=lon)
-        elev = g.get_point_elevation()
-        l.append((i, elev))
-
-    df['ELEV_M'] = [i[1] for i in l]
-    df.to_file(shp_out)
-
-
 if __name__ == '__main__':
     ''''''
-    root = '/media/nvm/dri_field_pts'
-    research = '/media/research/IrrigationGIS'
 
-    fields = os.path.join(root, 'fields')
-    nv_fields = os.path.join(fields, 'Nevada_Agricultural_Field_Boundaries_20250214')
-    output_shapefile_points = os.path.join(nv_fields, 'Joined_Points.shp')
+    root = '/media/research/IrrigationGIS'
+    if not os.path.exists(root):
+        root = '/home/dgketchum/data/IrrigationGIS'
 
-    share_data = os.path.join(research, 'swim', 'gridmet', 'gridmet_corrected')
-    data = os.path.join(root, 'fields_data')
-    gridmet = os.path.join(data, 'gridmet')
+    nv_data = os.path.join(root, 'Nevada', 'dri_field_pts')
+    fields_gis = os.path.join(nv_data, 'fields_gis')
+    nv_fields_boundaries = os.path.join(fields_gis, 'Nevada_Agricultural_Field_Boundaries_20250214')
+
+    data = os.path.join(nv_data, 'fields_data')
 
     FEATURE_ID = 'OPENET_ID'
 
-    shapefile_path = os.path.join(nv_fields, 'Nevada_Agricultural_Field_Boundaries_20250214_5071.shp')
+    share_data = os.path.join(root, 'swim', 'gridmet', 'gridmet_corrected')
+    gridmet_centroids = os.path.join(nv_fields_boundaries, 'Joined_Points.shp')
+
+    shapefile_path = os.path.join(nv_fields_boundaries, 'Nevada_Agricultural_Field_Boundaries_20250214_5071.shp')
     correction_tifs = os.path.join(share_data, 'correction_surfaces_aea')
 
-    fields_gridmet = os.path.join(nv_fields, 'Nevada_Fields_with_Nearest_GFID.shp')
-    gridmet_factors = os.path.join(nv_fields, 'Nevada_Fields_with_Nearest_GFID.json')
-
-    get_gridmet_corrections(fields=shapefile_path,
-                            gridmet_ras=correction_tifs,
-                            fields_join=fields_gridmet,
-                            factors_js=gridmet_factors,
-                            feature_id=FEATURE_ID,
-                            field_select=None)
+    fields_gridmet = os.path.join(nv_fields_boundaries, 'Nevada_Agricultural_Field_Boundaries_20250214_5071_GFID.shp')
+    gridmet_factors = os.path.join(nv_fields_boundaries, 'Nevada_Fields_with_Nearest_GFID.json')
 
     met = os.path.join(data, 'gridmet')
+
+    run_zonal_stats_for_fields(fields_gridmet, gridmet_centroids, correction_tifs,
+                               gridmet_factors, field_select=None, feature_id='FID')
 
     download_gridmet(fields_gridmet, gridmet_factors, met, start='1980-01-01', end='2024-12-31',
                      overwrite=False, feature_id=FEATURE_ID, target_fields=None)
