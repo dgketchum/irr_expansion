@@ -19,18 +19,18 @@ end_date = '2099-12-31'
 future_scenario_list = ['rcp45', 'rcp85']
 
 model_list = [
-    # 'bcc-csm1-1',
-    # 'bcc-csm1-1-m',
-    # 'BNU-ESM',
-    # 'CanESM2',
-    # 'CCSM4',
-    # 'CNRM-CM5',
-    # 'CSIRO-Mk3-6-0',
-    # 'GFDL-ESM2G',
-    # 'GFDL-ESM2M',
-    # 'HadGEM2-CC365',
-    # 'HadGEM2-ES365',
-    # 'inmcm4',
+    'bcc-csm1-1',
+    'bcc-csm1-1-m',
+    'BNU-ESM',
+    'CanESM2',
+    'CCSM4',
+    'CNRM-CM5',
+    'CSIRO-Mk3-6-0',
+    'GFDL-ESM2G',
+    'GFDL-ESM2M',
+    'HadGEM2-CC365',
+    'HadGEM2-ES365',
+    'inmcm4',
     'IPSL-CM5A-MR',
     'IPSL-CM5A-LR',
     'IPSL-CM5B-LR',
@@ -52,14 +52,7 @@ for scenario in future_scenario_list:
     for model in model_list:
         for yr in range(2006, 2100):
 
-            if scenario == 'rcp45':
-                continue
-
-            if model == 'IPSL-CM5A-MR' and yr < 2033:
-                continue
-
-            print('Running {}, {}, for {}'.format(scenario, model, yr))
-            maca_coll = ee.ImageCollection('IDAHO_EPSCOR/MACAv2_METDATA').filterDate(f'{yr}-01-01', f'{yr}-12-03')
+            maca_coll = ee.ImageCollection('IDAHO_EPSCOR/MACAv2_METDATA').filterDate(f'{yr}-01-01', f'{yr + 1}-01-01')
             maca_coll = maca_coll.filterMetadata('model', 'equals', model).filterMetadata('scenario', 'equals',
                                                                                           scenario)
 
@@ -115,7 +108,7 @@ for scenario in future_scenario_list:
 
             try:
                 task.start()
-                print(desc)
+                print(desc, flush=True)
 
             except ee.ee_exception.EEException as e:
                 print('{}, waiting on '.format(e), desc, '......')
