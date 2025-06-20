@@ -5,14 +5,11 @@ from multiprocessing import Pool
 
 import numpy as np
 import pandas as pd
+from scipy import stats
+
 from climate_indices import compute, indices
 
-from field_points.crop_codes import BASIN_STATES
-from field_points.crops import cdl_key
-from transition_modeling.transition_data import KEYS, OLD_KEYS
-
 COLS = ['et', 'cc', 'ppt', 'eto', 'eff_ppt']
-META_COLS = ['STUSPS', 'x', 'y', 'name', 'usbrid']
 
 IDX_KWARGS = dict(distribution=indices.Distribution.gamma,
                   data_start_year=1985,
@@ -54,17 +51,43 @@ class ArrayDisAssembly(object):
         return self.assembled
 
 
-def f_(d_):
+def pearsons_correlation(d_):
     coref = [np.ma.corrcoef(d_[0, i, :], d_[1, i, :])[0][1].item() for i in range(d_.shape[1])]
     return coref
 
 
+def linear_regression(d_):
+    coeffs = []
+
+    if np.ma.is_masked(d_):
+        d_ = np.ma.filled(d_, fill_value=np.nan)
+
+    for i in range(d_.shape[1]):
+        x = d_[1, i, :]
+        y = d_[0, i, :]
+
+        valid_indices = ~np.isnan(x) & ~np.isnan(y)
+        x_valid = x[valid_indices]
+        y_valid = y[valid_indices]
+
+        if x_valid.size < 2:
+            coeffs.append([np.nan, np.nan])
+            continue
+
+        try:
+            slope, intercept, r_value, p_value, std_err = stats.linregress(x_valid, y_valid)
+            coeffs.append([slope, intercept, p_value])
+        except (np.linalg.LinAlgError, ValueError):
+            coeffs.append([np.nan, np.nan, np.nan])
+
+    return coeffs
+
+
 def correlations(desc, npy_dir, out_dir, procs, calc):
-    met_periods = list(range(1, 13))  + [18, 24, 30, 36]
-    ag_periods = list(range(1, 13))
-    periods = list(product(met_periods, ag_periods))
+    met_periods = [12, 18, 24, 30, 36]
 
     npy = os.path.join(npy_dir, '{}.npy'.format(desc))
+
     print('\n', npy)
     js = npy.replace('.npy', '_index.json')
     input_array = np.load(npy)
@@ -73,11 +96,10 @@ def correlations(desc, npy_dir, out_dir, procs, calc):
         index = json.load(fp)['index']
 
     print(len(index), 'fields')
-    # data = data.reshape((len(index), -1, len(COLS)))
     dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1980, 2025) for m in range(1, 13)]
     months = np.multiply(np.ones((len(index), len(dt_range))), np.array([dt.month for dt in dt_range]))
     series = {}
-    for met_p, ag_p in periods:
+    for met_p in met_periods:
 
         if calc == 'simi':
             kc = input_array[:, :, COLS.index('et')].copy() / input_array[:, :, COLS.index('eto')].copy()
@@ -85,17 +107,15 @@ def correlations(desc, npy_dir, out_dir, procs, calc):
             kc = input_array[:, :, COLS.index('cc')].copy()
             kc[kc < 0.] = 0.
 
-        simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_p, **IDX_KWARGS), arr=kc, axis=1)
+        simi = np.apply_along_axis(lambda x: indices.spi(x, scale=12, **IDX_KWARGS), arr=kc, axis=1)
 
         ppt = input_array[:, :, COLS.index('ppt')].copy()
         spi = np.apply_along_axis(lambda x: indices.spi(x, scale=met_p, **IDX_KWARGS), arr=ppt, axis=1)
 
         stack = np.stack([simi[:, -len(dt_range):], spi[:, -len(dt_range):], months])
 
-        for from_month in range(4, 11):
-
-            if from_month - ag_p < 3:
-                continue
+        # looking back from within or at the end of a growing season
+        for from_month in range(12, 13):
 
             d_unmasked = stack[:, stack[2] == float(from_month)].copy().reshape((3, len(index), -1))
             mx = np.ma.masked_array(np.repeat(np.isnan(d_unmasked[:1, :, :]), 3, axis=0))
@@ -105,293 +125,51 @@ def correlations(desc, npy_dir, out_dir, procs, calc):
             arrays = a.disassemble(n_sections=procs)
 
             if procs > 1:
-                pool = Pool(processes=procs)
-
-                with pool as p:
-                    pool_results = [p.apply_async(f_, args=(a_,)) for a_ in arrays]
-                    corefs = [res.get() for res in pool_results]
+                with Pool(processes=procs) as p:
+                    # Pearson's Correlation
+                    pool_results_corr = [p.apply_async(pearsons_correlation, args=(a_,)) for a_ in arrays]
+                    corefs = [res.get() for res in pool_results_corr]
                     corefs = np.array([item for sublist in corefs for item in sublist])
 
+                    # Linear Regression and p-value
+                    pool_results_reg = [p.apply_async(linear_regression, args=(a_,)) for a_ in arrays]
+                    lin_reg_coeffs = [res.get() for res in pool_results_reg]
+                    lin_reg_coeffs = np.array([item for sublist in lin_reg_coeffs for item in sublist])
             else:
-                corefs = f_(arrays[0])
-                corefs = np.array(corefs)
+                corefs = np.array(pearsons_correlation(arrays[0]))
+                lin_reg_coeffs = np.array(linear_regression(arrays[0]))
 
-            col = 'met{}_ag{}_fr{}'.format(met_p, ag_p, from_month)
-            series[col] = corefs
-            print(f'{col:10} correlation: {corefs.min():.4f} to {corefs.max():.4f}')
-            pass
+            slope = lin_reg_coeffs[:, 0]
+            intercept = lin_reg_coeffs[:, 1]
+            p_value = lin_reg_coeffs[:, 2]
 
-        # print(desc, met_p, ag_p, '{:.3f}'.format(timeit.default_timer() - start_time))
+            col_corr = 'met{}_ag{}_fr{}_corr'.format(met_p, 12, from_month)
+            series[col_corr] = corefs
+            print(f'{col_corr:30} correlation: {np.nanmin(corefs):.4f} to {np.nanmax(corefs):.4f}')
+
+            col_slope = 'met{}_ag{}_fr{}_slope'.format(met_p, 12, from_month)
+            series[col_slope] = slope
+            print(f'{col_slope:30} slope: {np.nanmin(slope):.4f} to {np.nanmax(slope):.4f}')
+
+            col_intercept = 'met{}_ag{}_fr{}_intercept'.format(met_p, 12, from_month)
+            series[col_intercept] = intercept
+            print(f'{col_intercept:30} intercept: {np.nanmin(intercept):.4f} to {np.nanmax(intercept):.4f}')
+
+            col_pvalue = 'met{}_ag{}_fr{}_pvalue'.format(met_p, 12, from_month)
+            series[col_pvalue] = p_value
+            print(f'{col_pvalue:30} p-value: {np.nanmin(p_value):.4f} to {np.nanmax(p_value):.4f}\n\n')
 
     cols = sorted(list(series.keys()))
     df_data = np.array([series[k] for k in cols]).T
     df = pd.DataFrame(index=index, data=df_data, columns=cols)
 
-    ofile = os.path.join(out_dir, calc, '{}.csv'.format(desc))
+    ofile = os.path.join(out_dir, calc, '{}_wLRcoeffs_annualAg.csv'.format(desc))
 
     for k, v in series.items():
         df[k] = v
 
     df.to_csv(ofile)
     return ofile
-
-
-def partition_data(npy, out_dir, calc='simi', classification='usbr'):
-    periods = [(5, 1, 1),
-               (6, 2, 1),
-               (7, 2, 1),
-               (8, 4, 3),
-               (9, 5, 4),
-               (10, 7, 5)]
-
-    if classification == 'cdl':
-        COLS.append('cdl')
-        dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2005, 2022) for m in range(1, 13)]
-    else:
-        dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(1987, 2022) for m in range(1, 13)]
-
-    join_column, states = None, None
-
-    for p in periods:
-        rec, nrec = None, None
-        month_end, met_time, ag_time = p
-        desc = 'met{}_ag{}_fr{}'.format(met_time, ag_time, month_end)
-        first = True
-
-        if classification == 'usbr':
-            states = ['CA', 'ID', 'MT', 'OR', 'WA', 'WY']
-            join_column = 'usbrid'
-        elif classification == 'itype':
-            states = ['CO', 'MT', 'NM', 'UT', 'WA', 'WY']
-            join_column = 'itype'
-        elif classification == 'time':
-            states = BASIN_STATES
-            join_column = 'index'
-        elif classification == 'cdl':
-            states = BASIN_STATES
-            join_column = 'index'
-
-        for state in states:
-
-            npy_file = os.path.join(npy, '{}.npy'.format(state, state))
-            print(npy_file)
-            js = npy_file.replace('.npy', '_index.json')
-            with open(js, 'r') as fp:
-                dct = json.load(fp)
-                index = dct['index']
-                if classification == 'time':
-                    class_ = [int(i.split('_')[1]) for i in index]
-                else:
-                    class_ = dct[join_column]
-
-            n = int(np.ceil(len(index) / 5e3))
-            indx = split(index, n)
-
-            data_mem = np.fromfile(npy_file)
-            data_mem = data_mem.reshape((len(index), -1, len(COLS)))
-
-            for i, (s_ind, e_ind) in enumerate(indx):
-
-                data = data_mem[s_ind:e_ind, :, :]
-
-                months = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
-                                     np.array([dt.month for dt in dt_range]))
-
-                if classification == 'cdl':
-                    classific = data[:, -len(dt_range):, -1]
-                    data = data[:, -len(dt_range):, :]
-                else:
-                    classific = np.repeat(np.array(class_[s_ind:e_ind]).reshape((len(class_[s_ind:e_ind]), 1)),
-                                          len(dt_range), axis=1)
-
-                if calc == 'simi':
-                    kc = data[:, :, COLS.index('et')] / data[:, :, COLS.index('ieto')]
-                else:
-                    kc = data[:, :, COLS.index('cc')]
-                    kc[kc < 0.] = 0.
-
-                simi = np.apply_along_axis(lambda x: indices.spi(x, scale=ag_time, **IDX_KWARGS), arr=kc, axis=1)
-
-                # depends on locally modified climate_indices package that takes cwb = ppt - pet as input to spei
-                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('eto')]
-                spei = np.apply_along_axis(lambda x: indices.spei(x, scale=met_time, **IDX_KWARGS), arr=cwb, axis=1)
-                stack = np.stack([simi[:, -len(dt_range):], spei[:, -len(dt_range):], months, classific])
-                d = stack[:, stack[2] == float(month_end)].reshape((4, len(index[s_ind:e_ind]), -1))
-
-                if classification == 'itype':
-                    d = d[:, :, -7:]
-
-                if classification == 'time':
-                    early = d[:, :, :10]
-                    late = d[:, :, -10:]
-                    if first:
-                        e = early.copy()
-                        l = late.copy()
-                        first = False
-                    else:
-                        e = np.append(e, early, axis=1)
-                        l = np.append(l, late, axis=1)
-                    print('{}, {} of {}'.format(state, i + 1, n))
-                    continue
-
-                if first:
-                    rec = d.copy()
-                    first = False
-                else:
-                    rec = np.append(rec, d, axis=1)
-                print('{}, {} of {}'.format(state, i + 1, n))
-
-        if classification == 'time':
-            out_path = os.path.join(out_dir, '{}_early.npy'.format(desc))
-            e.tofile(out_path)
-            out_path = os.path.join(out_dir, '{}_late.npy'.format(desc))
-            l.tofile(out_path)
-            print('writing ', out_path)
-
-        else:
-            out_path = os.path.join(out_dir, '{}.npy'.format(desc))
-            rec.tofile(out_path)
-            print('writing ', out_path)
-
-
-def cdl_spei(npy, cdl_timescale, out_dir):
-    with open(cdl_timescale, 'r') as fp:
-        cdl_ts = json.load(fp)
-
-    COLS.append('cdl')
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2005, 2022) for m in range(1, 13)]
-
-    rec, nrec = None, None
-    first = True
-    params, ts_len = 5, 17
-
-    for state in BASIN_STATES:
-
-        npy_file = os.path.join(npy, '{}.npy'.format(state))
-        print(npy_file)
-        js = npy_file.replace('.npy', '_index.json')
-        with open(js, 'r') as fp:
-            dct = json.load(fp)
-            index = dct['index']
-
-        n = int(np.ceil(len(index) / 5e3))
-        indx = split(index, n)
-
-        data_mem = np.fromfile(npy_file)
-        data_mem = data_mem.reshape((len(index), -1, len(COLS)))
-
-        for i, (s_ind, e_ind) in enumerate(indx):
-
-            data = data_mem[s_ind:e_ind, :, :]
-            shape = (params, data.shape[0], ts_len)
-            target = np.zeros(shape)
-
-            for crop in KEYS:
-
-                ts, lb = cdl_ts[str(crop)]['ts'], cdl_ts[str(crop)]['lb']
-
-                if float(crop) not in data[:, :, 6]:
-                    continue
-
-                months = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
-                                     np.array([dt.month for dt in dt_range]))
-
-                lb_ = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
-                                  np.array([lb for _ in dt_range]))
-
-                ts_ = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
-                                  np.array([ts for _ in dt_range]))
-
-                classific = data[:, -len(dt_range):, -1]
-                data = data[:, -len(dt_range):, :]
-
-                # depends on locally modified climate_indices package that takes cwb = ppt - pet as input to spei
-                cwb = data[:, :, COLS.index('ppt')] - data[:, :, COLS.index('eto')]
-                spei_ = np.apply_along_axis(lambda x: indices.spei(cwb_mm=x, scale=ts, **IDX_KWARGS),
-                                            arr=cwb, axis=1)
-                if lb > 5:
-                    spei_ = np.roll(spei_, 12, axis=1)
-
-                stack = np.stack([spei_[:, -len(dt_range):], months, classific, ts_, lb_])
-                d = stack[:, stack[1] == float(lb)].reshape((params, len(index[s_ind:e_ind]), ts_len))
-                mask = d[2] == float(crop)
-                target = np.where(mask, d, target)
-
-            if first:
-                rec = d.copy()
-                first = False
-            else:
-                rec = np.append(rec, d, axis=1)
-            print('{}, {} of {}'.format(state, i + 1, n))
-
-    out_path = os.path.join(out_dir, 'cdl_spei.npy')
-    rec.tofile(out_path)
-    print('writing ', out_path)
-
-
-def cdl_et(npy, out_js, parameter):
-    cdl_ = cdl_key()
-    COLS.append('cdl')
-    dt_range = [pd.to_datetime('{}-{}-01'.format(y, m)) for y in range(2008, 2022) for m in range(1, 13)]
-    ct = 0
-    params, ts_len, gs_len = 3, 14, 7
-    dct = {}
-
-    for crop in OLD_KEYS:
-
-        cols = ['State', 'crop_code', 'count', 'mean_cc', 'min_cc', 'max_cc', 'std_cc']
-        df = pd.DataFrame(columns=cols)
-
-        for state in BASIN_STATES:
-
-            npy_file = os.path.join(npy, '{}.npy'.format(state))
-            js = npy_file.replace('.npy', '_index.json')
-            with open(js, 'r') as fp:
-                ind_dct = json.load(fp)
-                index = ind_dct['index']
-
-            n = int(np.ceil(len(index) / 5e3))
-            indx = split(index, n)
-
-            data_mem = np.fromfile(npy_file)
-            data_mem = data_mem.reshape((len(index), -1, len(COLS)))
-
-            for i, (s_ind, e_ind) in enumerate(indx):
-
-                data = data_mem[s_ind:e_ind, :, :]
-
-                if float(crop) not in data[:, :, 6]:
-                    continue
-
-                months = np.multiply(np.ones((len(index[s_ind:e_ind]), len(dt_range))),
-                                     np.array([dt.month in list(range(4, 11)) for dt in dt_range]))
-
-                classific = data[:, -len(dt_range):, -1]
-                data = data[:, -len(dt_range):, :]
-                cc = data[:, :, COLS.index(parameter)]
-
-                stack = np.stack([cc, months, classific])
-                d = stack[:, stack[1] == 1]
-                d = d.reshape((params, len(index[s_ind:e_ind]), ts_len * gs_len))
-                mask = d[2] == float(crop)
-                d = np.where(mask, d, np.nan)
-                d = np.nansum(d, axis=2) / (np.count_nonzero(~np.isnan(d), axis=2) / 7)
-                d = d[0, :]
-                d = d[~np.isnan(d)]
-
-                try:
-                    df.loc[ct, cols] = [state, crop, d.shape[0], d.mean(), d.min(), d.max(), d.std()]
-                except ValueError:
-                    continue
-
-                ct += 1
-
-        mean_cc = ((df['count'] * df['mean_cc']) / df['count'].sum()).sum()
-        dct[crop] = mean_cc
-        print('{} {}: {:.3f}'.format(crop, cdl_[crop][0], mean_cc))
-
-    with open(out_js, 'w') as fp:
-        json.dump(dct, fp, indent=4)
 
 
 if __name__ == '__main__':
@@ -408,13 +186,4 @@ if __name__ == '__main__':
     # correlations('field_summaries_EToF_final', indir, odir, procs=6, calc='simi')
     correlations('field_summaries_EToF_final', indir, odir, procs=6, calc='cc')
 
-    part = 'cdl'
-    t_scales = '/media/research/IrrigationGIS/expansion/analysis/cdl_spei_timescales.json'
-    indir = os.path.join(root, 'field_pts/fields_data/fields_cdl_npy')
-    spei = os.path.join(root, 'field_pts/fields_data/cdl_spei')
-    # cdl_spei(indir, t_scales, spei)
-
-    param = 'cc'
-    ccons = os.path.join(root, 'field_pts/fields_data/cdl_{}.json'.format(param))
-    # cdl_et(indir, ccons, param)
 # ========================= EOF ====================================================================

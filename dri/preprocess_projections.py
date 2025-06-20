@@ -1,10 +1,9 @@
 import os
-import json
-import pandas as pd
-import geopandas as gpd
-import numpy as np
-from tqdm import tqdm
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
+
+import pandas as pd
+from tqdm import tqdm
 
 REMAP_COLS = {'ETa_final_acre_ft': 'et', 'NetET_final_acre_ft': 'cc', 'PPT_MM': 'ppt',
               'ETO_MM': 'eto', 'Eff_PPT_Adjusted_acre_ft': 'eff_ppt'}
@@ -33,6 +32,7 @@ MODEL_LIST = ['bcc-csm1-1',
               'MIROC-ESM-CHEM',
               'MRI-CGCM3',
               'NorESM1-M']
+
 GRIDMET_RESAMPLE_MAP = {'year': 'first',
                         'month': 'first',
                         'day': 'first',
@@ -44,54 +44,52 @@ GRIDMET_RESAMPLE_MAP = {'year': 'first',
                         'eto_mm_uncorr': 'sum'}
 
 
-def preprocess_projections(gridmet, gridmet_gfid, outdir, projections_extracts, processed_projections,
-                           target_areas=None):
-    fields = pd.read_csv(gridmet_gfid, index_col='OPENET_ID')
+def _read_and_process_proj_file(proj_file):
+    if not os.path.exists(proj_file):
+        return None
 
-    for i, (fid, v) in enumerate(tqdm(fields.iterrows(),
-                                      desc=f'Processing Projections Data',
-                                      total=fields.shape[0])):
+    basename = os.path.basename(proj_file).replace('.csv', '')
+    parts = basename.split('_')
+    scenario = parts[0]
+    model = '_'.join(parts[1:-1])
 
-        g_fid = str(int(v['GFID']))
+    file_data_collector = defaultdict(lambda: defaultdict(list))
 
-        file_ = os.path.join(gridmet, 'gridmet_{}.csv'.format(g_fid))
+    try:
+        df = pd.read_csv(proj_file, usecols=['GFID', 'datenum', 'pr'], engine='c')
+        df['date'] = pd.to_datetime(df['datenum'], format='%Y%m%d')
+        df_monthly = df.groupby('GFID').resample('MS', on='date')[['pr']].sum()
 
-        met_df = pd.read_csv(file_, index_col='date', parse_dates=True)
-        met_new_cols = {c: f'{c}_gm' for c in met_df.columns}
-        met_df = met_df.resample('MS').agg(GRIDMET_RESAMPLE_MAP)
-        met_df = met_df.rename(columns=met_new_cols)
+        for gfid, group_df in df_monthly.groupby(level='GFID'):
+            file_data_collector[gfid][(scenario, model)].append(group_df.droplevel(0))
 
-        subarray = df[df['OPENET_ID'] == fid].copy()
-        subarray = subarray.rename(columns=REMAP_COLS)[COLS]
-        subarray = subarray.reindex(met_df.index)
-
-        subarray['eto'] = met_df['eto_mm_gm'].copy()
-        subarray['ppt'] = met_df['prcp_mm_gm'].copy()
-
-        for model in MODEL_LIST:
-            for scenario in FUTURE_SCENARIO_LIST:
-                if not (model == 'IPSL-CM5A-MR' and scenario == 'rcp45'):
-                    continue
-                proj_file = os.path.join(projection_raw, f'{scenario}_{model}')
-
-        if first:
-            array = np.zeros((len(zone_fids), len(subarray.index), len(REMAP_COLS))) * np.nan
-            first = False
-
-        idxes.append(fid)
-        array[i, :, :] = subarray.values.reshape((1, len(subarray.index), len(REMAP_COLS)))
-
-    out_json = os.path.join(outdir, os.path.basename(in_pqt).replace('.parquet', '_index.json'))
-    with open(out_json, 'w') as f:
-        json.dump({'index': idxes}, f, indent=4)
-
-    out_npy = os.path.join(outdir, os.path.basename(in_pqt).replace('.parquet', '.npy'))
-    np.save(out_npy, array)
-    print(f'saved {out_json}, len {len(idxes)}')
-    print(f'saved {out_npy}, shape: {array.shape}')
+        return dict(file_data_collector)
+    except Exception as e:
+        print(f"Error processing file {proj_file}: {e}")
+        return None
 
 
-def split_projections(fields, raw_exports, outdir):
+def _process_and_write_gfid(args):
+    gfid, gfid_data, outdir = args
+
+    processed_projections = []
+    for (scenario, model), df_list in gfid_data.items():
+        full_ts_df = pd.concat(df_list, axis=0)
+        full_ts_df.rename(columns={'pr': f'{scenario}_{model}_ppt'}, inplace=True)
+        processed_projections.append(full_ts_df)
+
+    if not processed_projections:
+        return
+
+    final_df = pd.DataFrame(index=pd.to_datetime([]))
+    for df in processed_projections:
+        final_df = final_df.join(df, how='outer')
+
+    out_file = os.path.join(outdir, f'{gfid}.parquet')
+    final_df.to_parquet(out_file)
+
+
+def split_projections(fields, raw_exports, outdir, num_workers=None):
     fields = pd.read_csv(fields)
     gfids = fields['GFID'].unique()
 
@@ -114,45 +112,41 @@ def split_projections(fields, raw_exports, outdir):
 
             proj_files.extend(add_files)
 
-    for proj_file in tqdm(proj_files, desc="Reading projection files"):
-        if not os.path.exists(proj_file):
+    if num_workers == 1:
+        results = []
+        for proj_file in proj_files:
+            result = _read_and_process_proj_file(proj_file)
+            results.append(result)
+
+    else:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            results = list(tqdm(executor.map(_read_and_process_proj_file, proj_files),
+                                total=len(proj_files),
+                                desc="Reading projection files"))
+
+    for file_result in results:
+        if file_result is None:
             continue
-
-        basename = os.path.basename(proj_file).replace('.csv', '')
-        parts = basename.split('_')
-        scenario = parts[0]
-        model = '_'.join(parts[1:-1])
-
-        df = pd.read_csv(proj_file, usecols=['GFID', 'datenum', 'pr'], engine='c')
-
-        df['date'] = pd.to_datetime(df['datenum'], format='%Y%m%d')
-
-        df_monthly = df.groupby('GFID').resample('MS', on='date')[['pr']].sum()
-
-        for gfid, group_df in df_monthly.groupby(level='GFID'):
-            gfid_data_collector[gfid][(scenario, model)].append(group_df.droplevel(0))
+        for gfid, data in file_result.items():
+            for (scenario, model), df_list in data.items():
+                gfid_data_collector[gfid][(scenario, model)].extend(df_list)
 
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
-    for i, gfid in enumerate(tqdm(gfids, desc=f'Processing Projections', total=len(gfids))):
+    tasks = []
+    for gfid in gfids:
+        if gfid in gfid_data_collector:
+            tasks.append((gfid, gfid_data_collector[gfid], outdir))
 
-        if gfid not in gfid_data_collector:
-            continue
-
-        processed_projections = []
-        for (scenario, model), df_list in gfid_data_collector[gfid].items():
-            full_ts_df = pd.concat(df_list, axis=0)
-            full_ts_df.rename(columns={'pr': f'{scenario}_{model}_ppt'}, inplace=True)
-            processed_projections.append(full_ts_df)
-
-        if not processed_projections:
-            continue
-
-        final_df = pd.DataFrame().join(processed_projections, how='outer')
-
-        out_file = os.path.join(outdir, f'{gfid}.parquet')
-        final_df.to_parquet(out_file)
+    if num_workers == 1:
+        for task in tasks:
+            _process_and_write_gfid(task)
+    else:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            list(tqdm(executor.map(_process_and_write_gfid, tasks),
+                      total=len(tasks),
+                      desc='Processing and writing projections'))
 
 
 if __name__ == '__main__':
@@ -169,12 +163,12 @@ if __name__ == '__main__':
     fields_gis = os.path.join(nv_data, 'fields_gis')
     nv_fields_boundaries = os.path.join(fields_gis, 'Nevada_Agricultural_Field_Boundaries_20250214')
     gfid_fields = os.path.join(nv_fields_boundaries,
-                                    'Nevada_Agricultural_Field_Boundaries_20250214_5071_GFID.csv')
+                               'Nevada_Agricultural_Field_Boundaries_20250214_5071_GFID.csv')
 
     projections_extracts_ = os.path.join(fields_data, 'projections', 'exports')
     projections_processed_ = os.path.join(fields_data, 'projections', 'processed')
     met = os.path.join(fields_data, 'gridmet')
-    split_projections(gfid_fields, projections_extracts_, projections_processed_)
+    split_projections(gfid_fields, projections_extracts_, projections_processed_, num_workers=6)
 
     projection_raw = os.path.join(fields_data, 'exports')
     projection_processed = os.path.join(fields_data, 'processed')
