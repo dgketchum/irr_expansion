@@ -100,8 +100,12 @@ def split_projections(fields, raw_exports, outdir):
     proj_files = []
     for model in MODEL_LIST:
         for scenario in FUTURE_SCENARIO_LIST:
+
+            if model not in ['bcc-csm1-1', 'BNU-ESM'] or scenario != 'rcp45':
+                continue
+
             add_files = []
-            for yr in range(2006, 2100):
+            for yr in range(2006, 2056):
                 file_ = os.path.join(raw_exports, f'{scenario}_{model}_{yr}.csv')
                 if not os.path.exists(file_):
                     print(f'{os.path.basename(file_)} does not exist')
